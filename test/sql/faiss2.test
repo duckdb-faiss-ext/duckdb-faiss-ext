@@ -16,8 +16,8 @@ CALL faiss_add('flat82', (SELECT lbl, emb FROM vectors))
 
 query II
 WITH
-queries AS (SELECT * FROM 'test/sql/queries.csv'),
-labels AS (SELECT UNNEST(faiss_search('flat82', 2, list_value(column1, column2, column3, column4, column5, column6, column7, column8))).label lbl FROM queries)
+queries AS (SELECT list_value(column1, column2, column3, column4, column5, column6, column7, column8) emb FROM 'test/sql/queries.csv'),
+labels AS (SELECT UNNEST(faiss_search('flat82', 2, emb)).label lbl FROM queries)
 SELECT * FROM labels JOIN vectors USING(lbl)
 ----
 10	[0.07759538, 0.79359758, 0.59450358, 0.7327987, 0.69523287, 0.67981976, 0.39232048, 0.56155747]

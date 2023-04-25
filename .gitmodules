@@ -2,3 +2,6 @@
 	path = duckdb
 	url = https://github.com/duckdb/duckdb
 	branch = master
+[submodule "faiss"]
+	path = faiss
+	url = https://github.com/facebookresearch/faiss.git
