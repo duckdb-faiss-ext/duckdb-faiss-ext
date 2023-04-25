@@ -17,22 +17,19 @@ namespace duckdb {
 
 struct IndexEntry {
 	unique_ptr<faiss::Index> index;
-	int dimension;
+	int dimension = 0;
 	vector<unique_ptr<float[]>> index_data;
 };
 
 static unordered_map<string, IndexEntry> indexes;
 
 struct CreateFunctionData : public TableFunctionData {
-	CreateFunctionData() {
-	}
-
-	string key = "";
-	int dimension;
+	string key;
+	int dimension = 0;
 	string description;
 };
 
-static unique_ptr<FunctionData> CreateBind(ClientContext &context, TableFunctionBindInput &input,
+static unique_ptr<FunctionData> CreateBind(ClientContext &, TableFunctionBindInput &input,
                                            vector<LogicalType> &return_types, vector<string> &names) {
 	auto result = make_uniq<CreateFunctionData>();
 	return_types.emplace_back(LogicalType::BOOLEAN);
@@ -45,7 +42,7 @@ static unique_ptr<FunctionData> CreateBind(ClientContext &context, TableFunction
 	return std::move(result);
 }
 
-static void CreateFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
+static void CreateFunction(ClientContext &, TableFunctionInput &data_p, DataChunk &) {
 	auto &bind_data = data_p.bind_data->Cast<CreateFunctionData>();
 
 	if (indexes.find(bind_data.key) != indexes.end()) {
@@ -60,13 +57,10 @@ static void CreateFunction(ClientContext &context, TableFunctionInput &data_p, D
 }
 
 struct DestroyFunctionData : public TableFunctionData {
-	DestroyFunctionData() {
-	}
-
-	string key = "";
+	string key;
 };
 
-static unique_ptr<FunctionData> DestroyBind(ClientContext &context, TableFunctionBindInput &input,
+static unique_ptr<FunctionData> DestroyBind(ClientContext &, TableFunctionBindInput &input,
                                             vector<LogicalType> &return_types, vector<string> &names) {
 	auto result = make_uniq<DestroyFunctionData>();
 	return_types.emplace_back(LogicalType::BOOLEAN);
@@ -76,7 +70,7 @@ static unique_ptr<FunctionData> DestroyBind(ClientContext &context, TableFunctio
 	return std::move(result);
 }
 
-static void DestroyFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
+static void DestroyFunction(ClientContext &, TableFunctionInput &data_p, DataChunk &) {
 	auto &bind_data = data_p.bind_data->Cast<DestroyFunctionData>();
 	if (indexes.find(bind_data.key) == indexes.end()) {
 		throw InvalidInputException("Could not find index %s.", bind_data.key);
@@ -84,32 +78,11 @@ static void DestroyFunction(ClientContext &context, TableFunctionInput &data_p, 
 	indexes.erase(bind_data.key);
 }
 
-struct AddData : TableFunctionData {
-	AddData(ClientContext &context) {
-	}
-
-	string key;
-};
-
-static unique_ptr<FunctionData> AddBind(ClientContext &context, TableFunctionBindInput &input,
-                                        vector<LogicalType> &return_types, vector<string> &names) {
-
-	if (input.input_table_types.size() != 1 || input.input_table_types[0].id() != LogicalTypeId::LIST) {
-		throw InvalidInputException("Need table with single list column as input");
-	}
-
-	return_types.emplace_back(LogicalType::BOOLEAN);
-	names.emplace_back("Success");
-
-	auto result = make_uniq<AddData>(context);
-	result->key = input.inputs[0].ToString();
-
-	return result;
-}
-
 static unique_ptr<Vector> ListVectorToFaiss(ClientContext &context, Vector &input_vector, idx_t n_lists,
                                             idx_t dimension) {
-	D_ASSERT(input_vector.GetType().id() == LogicalTypeId::LIST);
+	if (input_vector.GetType().id() != LogicalTypeId::LIST) {
+		throw InvalidInputException("Need list type for embeddings vectors");
+	}
 
 	input_vector.Flatten(n_lists); // FIXME use canonical
 	D_ASSERT(input_vector.GetVectorType() == VectorType::FLAT_VECTOR);
@@ -131,12 +104,33 @@ static unique_ptr<Vector> ListVectorToFaiss(ClientContext &context, Vector &inpu
 	list_child.Flatten(data_elements);
 
 	auto cast_result = make_uniq<Vector>(LogicalType::FLOAT, data_elements);
-	VectorOperations::Cast(context, list_child, *cast_result, data_elements, false);
+	VectorOperations::Cast(context, list_child, *cast_result, data_elements);
 	return cast_result;
 }
 
+struct AddData : TableFunctionData {
+	string key;
+	bool has_labels = false;
+};
+
+static unique_ptr<FunctionData> AddBind(ClientContext &, TableFunctionBindInput &input,
+                                        vector<LogicalType> &return_types, vector<string> &names) {
+	auto result = make_uniq<AddData>();
+
+	if (input.input_table_names.size() == 2) { // we have labels
+		result->has_labels = true;
+	}
+
+	return_types.emplace_back(LogicalType::BOOLEAN);
+	names.emplace_back("Success");
+
+	result->key = input.inputs[0].ToString();
+
+	return result;
+}
+
 static OperatorResultType AddFunction(ExecutionContext &context, TableFunctionInput &data_p, DataChunk &input,
-                                      DataChunk &output) {
+                                      DataChunk &) {
 	auto bind_data = data_p.bind_data->Cast<AddData>();
 	if (indexes.find(bind_data.key) == indexes.end()) {
 		throw InvalidInputException("Could not find index %s.", bind_data.key);
@@ -147,7 +141,8 @@ static OperatorResultType AddFunction(ExecutionContext &context, TableFunctionIn
 	// TODO support adding with labels, first column of table ay
 	auto data_elements = input.size() * entry.dimension;
 
-	auto child_vec = ListVectorToFaiss(context.client, input.data[0], input.size(), entry.dimension);
+	auto child_vec = ListVectorToFaiss(context.client, bind_data.has_labels ? input.data[1] : input.data[0],
+	                                   input.size(), entry.dimension);
 	auto child_ptr = FlatVector::GetData<float>(*child_vec);
 	auto index_data = unique_ptr<float[]>(new float[data_elements]);
 	memcpy(
@@ -155,75 +150,46 @@ static OperatorResultType AddFunction(ExecutionContext &context, TableFunctionIn
 	    data_elements *
 	        sizeof(float)); // TODO we should allocate this once, keep it around and then materialize the lists into it
 
-	indexes[bind_data.key].index->add(input.size(), index_data.get());
+	if (bind_data.has_labels) {
+		Vector label_cast_vec(LogicalType::BIGINT);
+		VectorOperations::Cast(context.client, input.data[0], label_cast_vec, input.size());
+		label_cast_vec.Flatten(input.size());
+		auto label_ptr = FlatVector::GetData<int64_t>(label_cast_vec);
+		indexes[bind_data.key].index->add_with_ids((faiss::idx_t)input.size(), index_data.get(), label_ptr);
+	} else {
+		indexes[bind_data.key].index->add((faiss::idx_t)input.size(), index_data.get());
+	}
 	entry.index_data.push_back(std::move(index_data));
 
 	return OperatorResultType::NEED_MORE_INPUT;
 }
 
-struct SearchData : TableFunctionData {
-	SearchData(ClientContext &context) {
+void SearchFunction(DataChunk &input, ExpressionState &state, Vector &output) {
+	// TODO how do we keep the index from being destroyed while we run? shared pointer in bind data?
+
+	auto key = input.data[0].GetValue(0).ToString();
+	auto n_results = input.data[1].GetValue(0).GetValue<int32_t>();
+
+	if (indexes.find(key) == indexes.end()) {
+		throw InvalidInputException("Could not find index %s.", key);
 	}
 
-	string key;
-	int n_results;
-};
+	auto &entry = indexes[key];
 
-static unique_ptr<FunctionData> SearchBind(ClientContext &context, TableFunctionBindInput &input,
-                                           vector<LogicalType> &return_types, vector<string> &names) {
-
-	if (input.input_table_types.size() != 1 || input.input_table_types[0].id() != LogicalTypeId::LIST) {
-		throw InvalidInputException("Need table with single list column as input");
-	}
-
-	return_types.emplace_back(input.input_table_types[0]);
-	child_list_t<LogicalType> struct_children;
-	struct_children.emplace_back("rank", LogicalType::INTEGER);
-	struct_children.emplace_back("label", LogicalType::BIGINT);
-	struct_children.emplace_back("distance", LogicalType::FLOAT);
-
-	return_types.emplace_back(LogicalType::LIST(LogicalType::STRUCT(std::move(struct_children))));
-
-	names.emplace_back("input");
-	names.emplace_back("results");
-
-	auto result = make_uniq<SearchData>(context);
-	result->key = input.inputs[0].ToString();
-	result->n_results = input.inputs[1].GetValue<int>();
-
-	return result;
-}
-
-// TODO this could probably be a scalar function
-static OperatorResultType SearchFunction(ExecutionContext &context, TableFunctionInput &data_p, DataChunk &input,
-                                         DataChunk &output) {
-
-	// TODO how do we keep the index from being destroyed? shared pointer?
-
-	auto bind_data = data_p.bind_data->Cast<SearchData>();
-	if (indexes.find(bind_data.key) == indexes.end()) {
-		throw InvalidInputException("Could not find index %s.", bind_data.key);
-	}
-
-	auto &entry = indexes[bind_data.key];
-
-	auto child_vec = ListVectorToFaiss(context.client, input.data[0], input.size(), entry.dimension);
+	auto child_vec = ListVectorToFaiss(state.GetContext(), input.data[2], input.size(), entry.dimension);
 	auto child_ptr = FlatVector::GetData<float>(*child_vec);
 
 	auto n_queries = input.size();
 
-	auto labels = unique_ptr<faiss::idx_t[]>(new faiss::idx_t[n_queries * bind_data.n_results]);
-	auto distances = unique_ptr<float[]>(new float[n_queries * bind_data.n_results]);
+	auto labels = unique_ptr<faiss::idx_t[]>(new faiss::idx_t[n_queries * n_results]);
+	auto distances = unique_ptr<float[]>(new float[n_queries * n_results]);
 
 	// the actual search woo
-	indexes[bind_data.key].index->search(n_queries, child_ptr, bind_data.n_results, distances.get(), labels.get());
+	indexes[key].index->search((faiss::idx_t)n_queries, child_ptr, n_results, distances.get(), labels.get());
 
-	output.data[0].Reference(input.data[0]);
-
-	auto &result_list_vector = output.data[1];
-	ListVector::SetListSize(result_list_vector, n_queries * bind_data.n_results);
-	auto list_ptr = ListVector::GetData(result_list_vector);
-	auto &result_struct_vector = ListVector::GetEntry(result_list_vector);
+	ListVector::SetListSize(output, n_queries * n_results);
+	auto list_ptr = ListVector::GetData(output);
+	auto &result_struct_vector = ListVector::GetEntry(output);
 	auto &struct_entries = StructVector::GetEntries(result_struct_vector);
 	auto rank_ptr = FlatVector::GetData<int32_t>(*struct_entries[0]);
 	auto label_ptr = FlatVector::GetData<int64_t>(*struct_entries[1]);
@@ -232,20 +198,16 @@ static OperatorResultType SearchFunction(ExecutionContext &context, TableFunctio
 	idx_t list_offset = 0;
 
 	for (idx_t row_idx = 0; row_idx < n_queries; row_idx++) {
-		list_ptr[row_idx].length = bind_data.n_results;
+		list_ptr[row_idx].length = n_results;
 		list_ptr[row_idx].offset = list_offset;
 
-		for (idx_t res_idx = 0; res_idx < bind_data.n_results; res_idx++) {
-			rank_ptr[list_offset + res_idx] = res_idx;
-			label_ptr[list_offset + res_idx] = labels[row_idx * bind_data.n_results + res_idx];
-			distance_ptr[list_offset + res_idx] = distances[row_idx * bind_data.n_results + res_idx];
+		for (idx_t res_idx = 0; res_idx < n_results; res_idx++) {
+			rank_ptr[list_offset + res_idx] = (int32_t)res_idx;
+			label_ptr[list_offset + res_idx] = labels[row_idx * n_results + res_idx];
+			distance_ptr[list_offset + res_idx] = distances[row_idx * n_results + res_idx];
 		}
-		list_offset += bind_data.n_results;
+		list_offset += n_results;
 	}
-
-	output.SetCardinality(n_queries);
-
-	return OperatorResultType::NEED_MORE_INPUT;
 }
 
 static void LoadInternal(DatabaseInstance &instance) {
@@ -268,11 +230,17 @@ static void LoadInternal(DatabaseInstance &instance) {
 	}
 
 	{
-		TableFunction search_function("faiss_search", {LogicalType::VARCHAR, LogicalType::INTEGER, LogicalType::TABLE},
-		                              nullptr, SearchBind);
-		search_function.in_out_function = SearchFunction;
-		CreateTableFunctionInfo search_info(search_function);
-		catalog.CreateTableFunction(*con.context, &search_info);
+		child_list_t<LogicalType> struct_children;
+		struct_children.emplace_back("rank", LogicalType::INTEGER);
+		struct_children.emplace_back("label", LogicalType::BIGINT);
+		struct_children.emplace_back("distance", LogicalType::FLOAT);
+		auto return_type = LogicalType::LIST(LogicalType::STRUCT(std::move(struct_children)));
+
+		ScalarFunction search_function(
+		    "faiss_search", {LogicalType::VARCHAR, LogicalType::INTEGER, LogicalType::LIST(LogicalType::ANY)},
+		    return_type, SearchFunction);
+		CreateScalarFunctionInfo search_info(search_function);
+		catalog.CreateFunction(*con.context, search_info);
 	}
 
 	{

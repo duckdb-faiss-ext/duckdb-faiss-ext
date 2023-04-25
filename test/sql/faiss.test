@@ -14,7 +14,7 @@ CALL faiss_add('flat8', (SELECT list_value(column1, column2, column3, column4, c
 
 
 query I
-SELECT UNNEST(results).distance FROM faiss_search('flat8', 2, (SELECT list_value(column1, column2, column3, column4, column5, column6, column7, column8) emb FROM 'test/sql/queries.csv'));
+SELECT UNNEST(faiss_search('flat8', 2, list_value(column1, column2, column3, column4, column5, column6, column7, column8))).distance FROM 'test/sql/queries.csv';
 ----
 0.15954433
 0.1742638
