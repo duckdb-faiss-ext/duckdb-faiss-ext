@@ -46,13 +46,17 @@ static unique_ptr<FunctionData> CreateBind(ClientContext &context, TableFunction
 }
 
 static void CreateFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
-	auto &data = data_p.bind_data->Cast<CreateFunctionData>();
+	auto &bind_data = data_p.bind_data->Cast<CreateFunctionData>();
+
+	if (indexes.find(bind_data.key) != indexes.end()) {
+		throw InvalidInputException("Index %s already exists.", bind_data.key);
+	}
 
 	IndexEntry entry;
-	entry.dimension = data.dimension;
-	entry.index = unique_ptr<faiss::Index>(faiss::index_factory(entry.dimension, data.description.c_str()));
+	entry.dimension = bind_data.dimension;
+	entry.index = unique_ptr<faiss::Index>(faiss::index_factory(entry.dimension, bind_data.description.c_str()));
 
-	indexes[data.key] = std::move(entry);
+	indexes[bind_data.key] = std::move(entry);
 }
 
 struct DestroyFunctionData : public TableFunctionData {
@@ -73,10 +77,11 @@ static unique_ptr<FunctionData> DestroyBind(ClientContext &context, TableFunctio
 }
 
 static void DestroyFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
-	auto &data = data_p.bind_data->Cast<DestroyFunctionData>();
-
-	// TODO check if its really there ay
-	indexes.erase(data.key);
+	auto &bind_data = data_p.bind_data->Cast<DestroyFunctionData>();
+	if (indexes.find(bind_data.key) == indexes.end()) {
+		throw InvalidInputException("Could not find index %s.", bind_data.key);
+	}
+	indexes.erase(bind_data.key);
 }
 
 struct AddData : TableFunctionData {
@@ -99,48 +104,51 @@ static unique_ptr<FunctionData> AddBind(ClientContext &context, TableFunctionBin
 	auto result = make_uniq<AddData>(context);
 	result->key = input.inputs[0].ToString();
 
-	if (indexes.find(result->key) == indexes.end()) {
-		throw InvalidInputException("Could not find index %s", result->key);
-	}
-
 	return result;
 }
 
-static OperatorResultType AddFunction(ExecutionContext &context, TableFunctionInput &data_p, DataChunk &input,
-                                      DataChunk &output) {
+static unique_ptr<Vector> ListVectorToFaiss(ClientContext &context, Vector &input_vector, idx_t n_lists,
+                                            idx_t dimension) {
+	D_ASSERT(input_vector.GetType().id() == LogicalTypeId::LIST);
 
-	auto bind_data = data_p.bind_data->Cast<AddData>();
-	// FIXME
-
-	D_ASSERT(indexes.find(bind_data.key) != indexes.end());
-	auto &entry = indexes[bind_data.key];
-
-	// TODO support adding with labels, first column of table ay
-
-	auto &input_vector = input.data[0];
-	input_vector.Flatten(input.size()); // FIXME use canonical
+	input_vector.Flatten(n_lists); // FIXME use canonical
 	D_ASSERT(input_vector.GetVectorType() == VectorType::FLAT_VECTOR);
 
 	auto list_entries = ListVector::GetData(input_vector);
 
-	for (idx_t row_idx = 0; row_idx < input.size(); row_idx++) {
-		if (list_entries[row_idx].length != entry.dimension) {
-			throw InvalidInputException("All list vectors need to have length %d, got %llu at index %llu",
-			                            entry.dimension, list_entries[row_idx].length, row_idx);
+	for (idx_t row_idx = 0; row_idx < n_lists; row_idx++) {
+		if (list_entries[row_idx].length != dimension) {
+			throw InvalidInputException("All list vectors need to have length %d, got %llu at index %llu", dimension,
+			                            list_entries[row_idx].length, row_idx);
 		}
 	}
 
 	auto list_child = ListVector::GetEntry(input_vector);
 	// TODO use canonical here as well
 
-	auto data_elements = input.size() * entry.dimension;
+	auto data_elements = n_lists * dimension;
 
 	list_child.Flatten(data_elements);
 
-	Vector cast_result(LogicalType::FLOAT, data_elements);
-	VectorOperations::Cast(context.client, list_child, cast_result, data_elements, false);
-	auto child_ptr = FlatVector::GetData<float>(cast_result);
+	auto cast_result = make_uniq<Vector>(LogicalType::FLOAT, data_elements);
+	VectorOperations::Cast(context, list_child, *cast_result, data_elements, false);
+	return cast_result;
+}
 
+static OperatorResultType AddFunction(ExecutionContext &context, TableFunctionInput &data_p, DataChunk &input,
+                                      DataChunk &output) {
+	auto bind_data = data_p.bind_data->Cast<AddData>();
+	if (indexes.find(bind_data.key) == indexes.end()) {
+		throw InvalidInputException("Could not find index %s.", bind_data.key);
+	}
+
+	auto &entry = indexes[bind_data.key];
+
+	// TODO support adding with labels, first column of table ay
+	auto data_elements = input.size() * entry.dimension;
+
+	auto child_vec = ListVectorToFaiss(context.client, input.data[0], input.size(), entry.dimension);
+	auto child_ptr = FlatVector::GetData<float>(*child_vec);
 	auto index_data = unique_ptr<float[]>(new float[data_elements]);
 	memcpy(
 	    index_data.get(), child_ptr,
@@ -148,7 +156,6 @@ static OperatorResultType AddFunction(ExecutionContext &context, TableFunctionIn
 	        sizeof(float)); // TODO we should allocate this once, keep it around and then materialize the lists into it
 
 	indexes[bind_data.key].index->add(input.size(), index_data.get());
-
 	entry.index_data.push_back(std::move(index_data));
 
 	return OperatorResultType::NEED_MORE_INPUT;
@@ -184,10 +191,6 @@ static unique_ptr<FunctionData> SearchBind(ClientContext &context, TableFunction
 	result->key = input.inputs[0].ToString();
 	result->n_results = input.inputs[1].GetValue<int>();
 
-	if (indexes.find(result->key) == indexes.end()) {
-		throw InvalidInputException("Could not find index %s", result->key);
-	}
-
 	return result;
 }
 
@@ -195,31 +198,17 @@ static unique_ptr<FunctionData> SearchBind(ClientContext &context, TableFunction
 static OperatorResultType SearchFunction(ExecutionContext &context, TableFunctionInput &data_p, DataChunk &input,
                                          DataChunk &output) {
 
+	// TODO how do we keep the index from being destroyed? shared pointer?
+
 	auto bind_data = data_p.bind_data->Cast<SearchData>();
-	// TODO not an assertion this can totally happen
-	D_ASSERT(indexes.find(bind_data.key) != indexes.end());
-	auto &entry = indexes[bind_data.key];
-
-	auto &input_vector = input.data[0];
-	input_vector.Flatten(input.size()); // FIXME use canonical
-	D_ASSERT(input_vector.GetVectorType() == VectorType::FLAT_VECTOR);
-
-	auto list_entries = ListVector::GetData(input_vector);
-
-	for (idx_t row_idx = 0; row_idx < input.size(); row_idx++) {
-		if (list_entries[row_idx].length != entry.dimension) {
-			throw InvalidInputException("All list vectors need to have length %d, got %llu at index %llu",
-			                            entry.dimension, list_entries[row_idx].length, row_idx);
-		}
+	if (indexes.find(bind_data.key) == indexes.end()) {
+		throw InvalidInputException("Could not find index %s.", bind_data.key);
 	}
 
-	auto list_child = ListVector::GetEntry(input_vector);
-	// TODO use canonical vector representation here as well
-	list_child.Flatten(input.size() * entry.dimension);
+	auto &entry = indexes[bind_data.key];
 
-	Vector cast_result(LogicalType::FLOAT, input.size() * entry.dimension);
-	VectorOperations::Cast(context.client, list_child, cast_result, input.size() * entry.dimension, false);
-	auto child_ptr = FlatVector::GetData<float>(cast_result);
+	auto child_vec = ListVectorToFaiss(context.client, input.data[0], input.size(), entry.dimension);
+	auto child_ptr = FlatVector::GetData<float>(*child_vec);
 
 	auto n_queries = input.size();
 
