@@ -1,0 +1,42 @@
+# name: test/sql/quack.test
+# description: test quack extension
+# group: [quack]
+
+require faiss
+
+statement ok
+CALL faiss_create('flat8', 8, 'Flat');
+
+
+
+statement ok
+CALL faiss_add('flat8', (SELECT list_value(column1, column2, column3, column4, column5, column6, column7, column8) emb FROM 'test/sql/training.csv'))
+
+
+query I
+SELECT UNNEST(results).distance FROM faiss_search('flat8', 2, (SELECT list_value(column1, column2, column3, column4, column5, column6, column7, column8) emb FROM 'test/sql/queries.csv'));
+----
+0.15954433
+0.1742638
+0.34609467
+0.40792713
+0.2060388
+0.21217726
+0.14408338
+0.20221785
+0.24310559
+0.292426
+0.21773355
+0.23657994
+0.15137593
+0.20014608
+0.25843582
+0.33056957
+0.13847579
+0.14418104
+0.2317629
+0.2904194
+
+
+statement ok
+CALL faiss_destroy('flat8');
