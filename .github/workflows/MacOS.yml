@@ -29,6 +29,9 @@ jobs:
       - name: Install Ninja
         run: brew install ninja
 
+      - name: Install LibOMP
+        run: brew install libomp
+
       - uses: actions/setup-python@v2
         with:
           python-version: '3.7'
@@ -64,10 +67,10 @@ jobs:
             echo 'No key set, skipping'
           elif [[ "$GITHUB_REF" =~ ^(refs/tags/v.+)$ ]] ; then
             python -m pip install awscli
-            ./scripts/extension-upload.sh quack ${{ github.ref_name }} $DUCKDB_VERSION osx_amd64 $BUCKET_NAME true
-            ./scripts/extension-upload.sh quack ${{ github.ref_name }} $DUCKDB_VERSION osx_arm64 $BUCKET_NAME true
+            ./scripts/extension-upload.sh faiss ${{ github.ref_name }} $DUCKDB_VERSION osx_amd64 $BUCKET_NAME true
+            ./scripts/extension-upload.sh faiss ${{ github.ref_name }} $DUCKDB_VERSION osx_arm64 $BUCKET_NAME true
           elif [[ "$GITHUB_REF" =~ ^(refs/heads/main)$ ]] ; then
             python -m pip install awscli
-            ./scripts/extension-upload.sh quack `git log -1 --format=%h` $DUCKDB_VERSION osx_amd64 $BUCKET_NAME false
-            ./scripts/extension-upload.sh quack `git log -1 --format=%h` $DUCKDB_VERSION osx_arm64 $BUCKET_NAME false
+            ./scripts/extension-upload.sh faiss `git log -1 --format=%h` $DUCKDB_VERSION osx_amd64 $BUCKET_NAME false
+            ./scripts/extension-upload.sh faiss `git log -1 --format=%h` $DUCKDB_VERSION osx_arm64 $BUCKET_NAME false
           fi
