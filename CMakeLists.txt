@@ -8,18 +8,28 @@ project(${TARGET_NAME})
 include_directories(src/include)
 
 # we don't need other peoples build script
-FILE(GLOB EXTENSION_SOURCES src/*.cpp "faiss/faiss/*.cpp"  "faiss/faiss/impl/*.cpp" "faiss/faiss/invlists/*.cpp" "faiss/faiss/utils/*.cpp" "faiss/faiss/utils/distances_fused/*.cpp")
+file(
+  GLOB
+  EXTENSION_SOURCES
+  src/*.cpp
+  "faiss/faiss/*.cpp"
+  "faiss/faiss/impl/*.cpp"
+  "faiss/faiss/invlists/*.cpp"
+  "faiss/faiss/utils/*.cpp"
+  "faiss/faiss/utils/distances_fused/*.cpp")
 add_definitions(-DFINTEGER=int)
 
 add_library(${EXTENSION_NAME} STATIC ${EXTENSION_SOURCES})
 include_directories(faiss/)
 
-if (APPLE) # requires libomp from homebrew but statically links
-    execute_process(COMMAND brew --prefix libomp OUTPUT_VARIABLE LIBOMP_PREFIX OUTPUT_STRIP_TRAILING_WHITESPACE)
-    include_directories(${LIBOMP_PREFIX}/include)
-    target_link_libraries(
-      ${EXTENSION_NAME} ${LIBOMP_PREFIX}/lib/libomp.a
-      "-framework Accelerate")
+if(APPLE) # requires libomp from homebrew but statically links
+  execute_process(
+    COMMAND brew --prefix libomp
+    OUTPUT_VARIABLE LIBOMP_PREFIX
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+  include_directories(${LIBOMP_PREFIX}/include)
+  target_link_libraries(${EXTENSION_NAME} ${LIBOMP_PREFIX}/lib/libomp.a
+                        "-framework Accelerate")
 endif()
 
 set(EXTENSION_SOURCES ${EXTENSION_SOURCES} ${FAISS_SOURCES})
