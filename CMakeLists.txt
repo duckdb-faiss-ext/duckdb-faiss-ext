@@ -14,12 +14,13 @@ add_definitions(-DFINTEGER=int)
 add_library(${EXTENSION_NAME} STATIC ${EXTENSION_SOURCES})
 include_directories(faiss/)
 
-# FIXME this hardcodes the omp path
-include_directories(/opt/homebrew/opt/libomp/include)
-
-target_link_libraries(
-  ${EXTENSION_NAME} /opt/homebrew/opt/libomp/lib/libomp.a
-  "-framework Accelerate")
+if (APPLE) # requires libomp from homebrew but statically links
+    execute_process(COMMAND brew --prefix libomp OUTPUT_VARIABLE LIBOMP_PREFIX OUTPUT_STRIP_TRAILING_WHITESPACE)
+    include_directories(${LIBOMP_PREFIX}/include)
+    target_link_libraries(
+      ${EXTENSION_NAME} ${LIBOMP_PREFIX}/lib/libomp.a
+      "-framework Accelerate")
+endif()
 
 set(EXTENSION_SOURCES ${EXTENSION_SOURCES} ${FAISS_SOURCES})
 
