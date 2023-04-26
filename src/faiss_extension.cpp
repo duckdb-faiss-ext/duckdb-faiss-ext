@@ -12,16 +12,23 @@
 
 #include <duckdb/parser/parsed_data/create_scalar_function_info.hpp>
 #include "duckdb/parser/parsed_data/create_table_function_info.hpp"
+#include "duckdb/storage/object_cache.hpp"
 
 namespace duckdb {
 
-struct IndexEntry {
+struct IndexEntry : ObjectCacheEntry {
 	unique_ptr<faiss::Index> index;
 	int dimension = 0;
 	vector<unique_ptr<float[]>> index_data;
-};
 
-static unordered_map<string, IndexEntry> indexes;
+	static string ObjectType() {
+		return "faiss_index";
+	}
+
+	string GetObjectType() override {
+		return IndexEntry::ObjectType();
+	}
+};
 
 struct CreateFunctionData : public TableFunctionData {
 	string key;
@@ -42,18 +49,19 @@ static unique_ptr<FunctionData> CreateBind(ClientContext &, TableFunctionBindInp
 	return std::move(result);
 }
 
-static void CreateFunction(ClientContext &, TableFunctionInput &data_p, DataChunk &) {
+static void CreateFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &) {
 	auto &bind_data = data_p.bind_data->Cast<CreateFunctionData>();
+	auto &object_cache = ObjectCache::GetObjectCache(context);
 
-	if (indexes.find(bind_data.key) != indexes.end()) {
+	if (object_cache.Get<IndexEntry>(bind_data.key)) {
 		throw InvalidInputException("Index %s already exists.", bind_data.key);
 	}
 
-	IndexEntry entry;
-	entry.dimension = bind_data.dimension;
-	entry.index = unique_ptr<faiss::Index>(faiss::index_factory(entry.dimension, bind_data.description.c_str()));
+	auto entry = make_shared<IndexEntry>();
+	entry->dimension = bind_data.dimension;
+	entry->index = unique_ptr<faiss::Index>(faiss::index_factory(entry->dimension, bind_data.description.c_str()));
 
-	indexes[bind_data.key] = std::move(entry);
+	object_cache.Put(bind_data.key, std::move(entry));
 }
 
 struct DestroyFunctionData : public TableFunctionData {
@@ -70,12 +78,15 @@ static unique_ptr<FunctionData> DestroyBind(ClientContext &, TableFunctionBindIn
 	return std::move(result);
 }
 
-static void DestroyFunction(ClientContext &, TableFunctionInput &data_p, DataChunk &) {
+static void DestroyFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &) {
 	auto &bind_data = data_p.bind_data->Cast<DestroyFunctionData>();
-	if (indexes.find(bind_data.key) == indexes.end()) {
+	auto &object_cache = ObjectCache::GetObjectCache(context);
+
+	if (!object_cache.Get<IndexEntry>(bind_data.key)) {
 		throw InvalidInputException("Could not find index %s.", bind_data.key);
 	}
-	indexes.erase(bind_data.key);
+
+	object_cache.Remove(bind_data.key);
 }
 
 static unique_ptr<Vector> ListVectorToFaiss(ClientContext &context, Vector &input_vector, idx_t n_lists,
@@ -132,15 +143,14 @@ static unique_ptr<FunctionData> AddBind(ClientContext &, TableFunctionBindInput 
 static OperatorResultType AddFunction(ExecutionContext &context, TableFunctionInput &data_p, DataChunk &input,
                                       DataChunk &) {
 	auto bind_data = data_p.bind_data->Cast<AddData>();
-	if (indexes.find(bind_data.key) == indexes.end()) {
+	auto &object_cache = ObjectCache::GetObjectCache(context.client);
+	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data.key);
+	if (!entry_ptr) {
 		throw InvalidInputException("Could not find index %s.", bind_data.key);
 	}
+	auto &entry = *entry_ptr;
 
-	auto &entry = indexes[bind_data.key];
-
-	// TODO support adding with labels, first column of table ay
 	auto data_elements = input.size() * entry.dimension;
-
 	auto child_vec = ListVectorToFaiss(context.client, bind_data.has_labels ? input.data[1] : input.data[0],
 	                                   input.size(), entry.dimension);
 	auto child_ptr = FlatVector::GetData<float>(*child_vec);
@@ -155,9 +165,9 @@ static OperatorResultType AddFunction(ExecutionContext &context, TableFunctionIn
 		VectorOperations::Cast(context.client, input.data[0], label_cast_vec, input.size());
 		label_cast_vec.Flatten(input.size());
 		auto label_ptr = FlatVector::GetData<int64_t>(label_cast_vec);
-		indexes[bind_data.key].index->add_with_ids((faiss::idx_t)input.size(), index_data.get(), label_ptr);
+		entry.index->add_with_ids((faiss::idx_t)input.size(), index_data.get(), label_ptr);
 	} else {
-		indexes[bind_data.key].index->add((faiss::idx_t)input.size(), index_data.get());
+		entry.index->add((faiss::idx_t)input.size(), index_data.get());
 	}
 	entry.index_data.push_back(std::move(index_data));
 
@@ -165,16 +175,16 @@ static OperatorResultType AddFunction(ExecutionContext &context, TableFunctionIn
 }
 
 void SearchFunction(DataChunk &input, ExpressionState &state, Vector &output) {
-	// TODO how do we keep the index from being destroyed while we run? shared pointer in bind data?
-
+	auto &object_cache = ObjectCache::GetObjectCache(state.GetContext());
 	auto key = input.data[0].GetValue(0).ToString();
-	auto n_results = input.data[1].GetValue(0).GetValue<int32_t>();
 
-	if (indexes.find(key) == indexes.end()) {
+	auto entry_ptr = object_cache.Get<IndexEntry>(key);
+	if (!entry_ptr) {
 		throw InvalidInputException("Could not find index %s.", key);
 	}
+	auto &entry = *entry_ptr;
 
-	auto &entry = indexes[key];
+	auto n_results = input.data[1].GetValue(0).GetValue<int32_t>();
 
 	auto child_vec = ListVectorToFaiss(state.GetContext(), input.data[2], input.size(), entry.dimension);
 	auto child_ptr = FlatVector::GetData<float>(*child_vec);
@@ -185,7 +195,7 @@ void SearchFunction(DataChunk &input, ExpressionState &state, Vector &output) {
 	auto distances = unique_ptr<float[]>(new float[n_queries * n_results]);
 
 	// the actual search woo
-	indexes[key].index->search((faiss::idx_t)n_queries, child_ptr, n_results, distances.get(), labels.get());
+	entry.index->search((faiss::idx_t)n_queries, child_ptr, n_results, distances.get(), labels.get());
 
 	ListVector::SetListSize(output, n_queries * n_results);
 	auto list_ptr = ListVector::GetData(output);
