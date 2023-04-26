@@ -32,8 +32,9 @@ jobs:
       - name: Install LibOMP
         run: |
           brew install libomp
+          brew info libomp
           ls -R /opt/homebrew/opt/libomp/
-          
+
       - uses: actions/setup-python@v2
         with:
           python-version: '3.7'
