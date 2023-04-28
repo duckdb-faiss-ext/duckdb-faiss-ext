@@ -29,10 +29,6 @@ jobs:
       - name: Install Ninja
         run: brew install ninja
 
-      - name: Install LibOMP
-        run: |
-          brew install libomp
-
       - uses: actions/setup-python@v2
         with:
           python-version: '3.7'
@@ -47,6 +43,7 @@ jobs:
       - name: Build extension
         shell: bash
         run: |
+          export CXX="clang++ -arch x86_64 -arch arm64"
           make release
           make test
 

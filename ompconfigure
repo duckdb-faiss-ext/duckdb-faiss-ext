@@ -1,0 +1,9 @@
+#!/bin/sh
+LLVM_VERSION="16.0.2"
+
+rm -rf libomp
+mkdir -p libomp/cmake libomp/omp/build
+curl -s -L https://github.com/llvm/llvm-project/releases/download/llvmorg-$LLVM_VERSION/openmp-$LLVM_VERSION.src.tar.xz | tar xz --strip-components 1 -C libomp/omp
+curl -s -L https://github.com/llvm/llvm-project/releases/download/llvmorg-$LLVM_VERSION/cmake-$LLVM_VERSION.src.tar.xz | tar xz --strip-components 1 -C libomp/cmake
+
+(cd libomp/omp/build && cmake -DLIBOMP_ENABLE_SHARED=OFF .. && make -j)

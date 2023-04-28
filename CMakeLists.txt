@@ -20,17 +20,24 @@ file(
 add_definitions(-DFINTEGER=int)
 
 add_library(${EXTENSION_NAME} STATIC ${EXTENSION_SOURCES})
-include_directories(faiss/)
+include_directories(faiss/ libomp/omp/build/runtime/src)
 
-if(APPLE) # requires libomp from homebrew but statically links
-  execute_process(
-    COMMAND brew --prefix libomp
-    OUTPUT_VARIABLE LIBOMP_PREFIX
-    OUTPUT_STRIP_TRAILING_WHITESPACE)
-  include_directories(${LIBOMP_PREFIX}/include)
-  target_link_libraries(${EXTENSION_NAME} ${LIBOMP_PREFIX}/lib/libomp.a
-                        "-framework Accelerate")
+# yay cmake this needs to be an absolute path
+set(OMP_STATIC_LIB ${CMAKE_CURRENT_SOURCE_DIR}/libomp/omp/build/runtime/src/libomp.a)
+
+add_custom_command(
+  OUTPUT ${OMP_STATIC_LIB}
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+  COMMAND sh ompconfigure)
+
+if(APPLE)
+  target_link_libraries(${EXTENSION_NAME} "-framework Accelerate")
 endif()
+
+add_custom_target(BuildOMP DEPENDS ${OMP_STATIC_LIB})
+add_dependencies(${EXTENSION_NAME} BuildOMP)
+
+target_link_libraries(${EXTENSION_NAME} ${OMP_STATIC_LIB})
 
 set(EXTENSION_SOURCES ${EXTENSION_SOURCES} ${FAISS_SOURCES})
 

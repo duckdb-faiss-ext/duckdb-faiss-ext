@@ -33,6 +33,7 @@ clean:
 	rm -rf build
 	rm -rf testext
 	cd duckdb && make clean
+	rm -rf libomp
 
 # Main build
 debug:
