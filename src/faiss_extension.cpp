@@ -86,7 +86,7 @@ static void DestroyFunction(ClientContext &context, TableFunctionInput &data_p, 
 		throw InvalidInputException("Could not find index %s.", bind_data.key);
 	}
 
-	object_cache.Remove(bind_data.key);
+	object_cache.Put(bind_data.key, nullptr);
 }
 
 static unique_ptr<Vector> ListVectorToFaiss(ClientContext &context, Vector &input_vector, idx_t n_lists,
