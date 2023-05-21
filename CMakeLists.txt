@@ -7,7 +7,7 @@ set(EXTENSION_NAME ${TARGET_NAME}_extension)
 project(${TARGET_NAME})
 include_directories(src/include)
 
-# we don't need other peoples build script
+# we don't need other peoples build script (says Hannes)
 file(
   GLOB
   EXTENSION_SOURCES
@@ -20,6 +20,7 @@ file(
 add_definitions(-DFINTEGER=int)
 
 add_library(${EXTENSION_NAME} STATIC ${EXTENSION_SOURCES})
+
 include_directories(faiss/ libomp/omp/build/runtime/src)
 
 # yay cmake this needs to be an absolute path
@@ -36,10 +37,24 @@ endif()
 
 add_custom_target(BuildOMP DEPENDS ${OMP_STATIC_LIB})
 add_dependencies(${EXTENSION_NAME} BuildOMP)
-
-target_link_libraries(${EXTENSION_NAME} ${OMP_STATIC_LIB})
+target_link_libraries(${EXTENSION_NAME} PRIVATE ${OMP_STATIC_LIB})
 
 set(EXTENSION_SOURCES ${EXTENSION_SOURCES} ${FAISS_SOURCES})
+
+# We do... (really need other peoples build script) - says Arjen
+find_package(MKL)
+if(MKL_FOUND)
+  target_link_libraries(${EXTENSION_NAME} PRIVATE ${MKL_LIBRARIES})
+  # target_link_libraries(faiss_avx2 PRIVATE ${MKL_LIBRARIES})
+else()
+  find_package(BLAS REQUIRED)
+  target_link_libraries(${EXTENSION_NAME} PRIVATE ${BLAS_LIBRARIES})
+  # target_link_libraries(faiss_avx2 PRIVATE ${BLAS_LIBRARIES})
+
+  find_package(LAPACK REQUIRED)
+  target_link_libraries(${EXTENSION_NAME} PRIVATE ${LAPACK_LIBRARIES})
+  # target_link_libraries(faiss_avx2 PRIVATE ${LAPACK_LIBRARIES})
+endif()
 
 set(PARAMETERS "-warnings")
 build_loadable_extension(${TARGET_NAME} ${PARAMETERS} ${EXTENSION_SOURCES})
