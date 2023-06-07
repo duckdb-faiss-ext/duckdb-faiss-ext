@@ -135,7 +135,7 @@ static unique_ptr<FunctionData> AddBind(ClientContext &, TableFunctionBindInput 
 	return_types.emplace_back(LogicalType::BOOLEAN);
 	names.emplace_back("Success");
 
-	result->key = input.inputs[0].ToString();
+	result->key = input.inputs[1].ToString();
 
 	return result;
 }
@@ -198,6 +198,8 @@ void SearchFunction(DataChunk &input, ExpressionState &state, Vector &output) {
 	entry.index->search((faiss::idx_t)n_queries, child_ptr, n_results, distances.get(), labels.get());
 
 	ListVector::SetListSize(output, n_queries * n_results);
+	ListVector::Reserve(output, n_queries * n_results);
+
 	auto list_ptr = ListVector::GetData(output);
 	auto &result_struct_vector = ListVector::GetEntry(output);
 	auto &struct_entries = StructVector::GetEntries(result_struct_vector);
@@ -233,7 +235,7 @@ static void LoadInternal(DatabaseInstance &instance) {
 	}
 
 	{
-		TableFunction add_function("faiss_add", {LogicalType::VARCHAR, LogicalType::TABLE}, nullptr, AddBind);
+		TableFunction add_function("faiss_add", {LogicalType::TABLE, LogicalType::VARCHAR}, nullptr, AddBind);
 		add_function.in_out_function = AddFunction;
 		CreateTableFunctionInfo add_info(add_function);
 		catalog.CreateTableFunction(*con.context, &add_info);

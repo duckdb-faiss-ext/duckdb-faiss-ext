@@ -23,7 +23,8 @@ add_library(${EXTENSION_NAME} STATIC ${EXTENSION_SOURCES})
 include_directories(faiss/ libomp/omp/build/runtime/src)
 
 # yay cmake this needs to be an absolute path
-set(OMP_STATIC_LIB ${CMAKE_CURRENT_SOURCE_DIR}/libomp/omp/build/runtime/src/libomp.a)
+set(OMP_STATIC_LIB
+    ${CMAKE_CURRENT_SOURCE_DIR}/libomp/omp/build/runtime/src/libomp.a)
 
 add_custom_command(
   OUTPUT ${OMP_STATIC_LIB}
