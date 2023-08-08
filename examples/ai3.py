@@ -7,7 +7,7 @@ con.sql("LOAD '../build/release/extension/faiss/faiss.duckdb_extension'")
 tweets_rel = con.from_query("FROM 'Tweets.csv.gz'").project('*, row_number() over () internal_tweet_id')
 
 training_sample = tweets_rel.query("tweets", "FROM tweets USING SAMPLE 500 (reservoir, 42)")
-testing_sample = tweets_rel.except_(training_sample).query("tweets_testing",  "FROM tweets USING SAMPLE 500 (reservoir, 42)")
+testing_sample = tweets_rel.except_(training_sample).query("tweets_testing",  "FROM tweets_testing USING SAMPLE 500 (reservoir, 42)")
 
 # setup model
 import torch
@@ -18,7 +18,6 @@ sbert_version = 'sentence-transformers/all-distilroberta-v1'
 tokenizer = transformers.AutoTokenizer.from_pretrained(sbert_version)
 model = transformers.AutoModel.from_pretrained(sbert_version)
 
-
 def mean_pooling(model_output, attention_mask):
     token_embeddings = model_output[0]
     input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
@@ -28,7 +27,7 @@ def create_embeddings(df):
     encodings = tokenizer(df['text'].tolist(), padding=True, truncation=True, max_length=160, return_tensors='pt')
     model_output = model(**encodings)
     sentence_embeddings = torch.nn.functional.normalize(mean_pooling(model_output, encodings['attention_mask']), p=2, dim=1)
-    df['emb'] = sentence_embeddings.tolist()
+    df['emb'] = sentence_embeddings.tolist() # uuugly
     return(df)
 
 def create_embeddings_rel(con, rel):
