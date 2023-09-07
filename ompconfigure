@@ -1,5 +1,5 @@
 #!/bin/sh
-LLVM_VERSION=16.0.5
+LLVM_VERSION=$(llvm-config --version)
 
 rm -rf libomp
 mkdir -p libomp/cmake libomp/omp/build
