@@ -13,12 +13,11 @@ Compile with `clang` instead of `gcc`:
 
 ## OMP
 
-Edit the `configomp` script to:
+Edit the `ompconfigure` script to:
 
 + use `llvm-config --version`.
-+ use `tar -x --xz`.
 
-Standard ways to add `-fPIC` to compilation all fail, because of the `configomp` script hack.
+Standard ways to add `-fPIC` to compilation all fail, because of the `ompconfigure` script hack.
 Modify the script to include `-DCMAKE_POSITION_INDEPENDENT_CODE=ON` on the `cmake` call.
 
 ## Math Kernel Library:
@@ -35,6 +34,8 @@ Install the math kernel library of choice, using instructions below:
     sudo dnf install openblas-devel
 
 ### Intel
+
+__The Intel instructions do not currently work correctly due to a key mismatch problem.__
 
 Create the `/etc/yum.repos.d/oneAPI.repo` according to the instructions by the
 [Intel install docs](https://www.intel.com/content/www/us/en/developer/tools/oneapi/base-toolkit-download.html?operatingsystem=linux&distributions=dnf).
