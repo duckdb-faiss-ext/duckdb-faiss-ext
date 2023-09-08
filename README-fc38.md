@@ -17,25 +17,28 @@ Edit the `ompconfigure` script to:
 
 + use `llvm-config --version`.
 
+_Already in main branch:_
+
 Standard ways to add `-fPIC` to compilation all fail, because of the `ompconfigure` script hack.
 Modify the script to include `-DCMAKE_POSITION_INDEPENDENT_CODE=ON` on the `cmake` call.
 
 ## Math Kernel Library:
 
+_Probably no longer needed:_
 Add necessary lines from FAISS cmake configs to `CMakeLists.txt`.
 
-Unsure if needed:
-_(Compiling shows that FC38 uses [`flexiblas`](https://www.mpi-magdeburg.mpg.de/projects/flexiblas) libraries)_:
-
+_Necessary:_
 Install the math kernel library of choice, using instructions below:
 
 ### OpenBLAS
 
     sudo dnf install openblas-devel
 
+I don't fully understand, as compiling shows that FC38 may already use [`flexiblas`](https://www.mpi-magdeburg.mpg.de/projects/flexiblas) libraries).
+
 ### Intel
 
-__The Intel instructions do not currently work correctly due to a key mismatch problem.__
+__The Intel instructions do not currently work correctly on Fedora Core, due to a key mismatch problem.__
 
 Create the `/etc/yum.repos.d/oneAPI.repo` according to the instructions by the
 [Intel install docs](https://www.intel.com/content/www/us/en/developer/tools/oneapi/base-toolkit-download.html?operatingsystem=linux&distributions=dnf).
