@@ -7,7 +7,7 @@ set(EXTENSION_NAME ${TARGET_NAME}_extension)
 project(${TARGET_NAME})
 include_directories(src/include)
 
-# we don't need other peoples build script
+# we don't need other peoples build script (says Hannes)
 file(
         GLOB
         EXTENSION_SOURCES
@@ -37,13 +37,29 @@ endif()
 add_custom_target(BuildOMP DEPENDS ${OMP_STATIC_LIB})
 add_dependencies(${EXTENSION_NAME} BuildOMP)
 
-target_link_libraries(${EXTENSION_NAME} ${OMP_STATIC_LIB})
+# Hannes: target_link_libraries(${EXTENSION_NAME} ${OMP_STATIC_LIB})
+target_link_libraries(${EXTENSION_NAME} PRIVATE ${OMP_STATIC_LIB})
 
-find_package(BLAS REQUIRED)
-message(${BLAS_LIBRARIES})
-target_link_libraries(${EXTENSION_NAME} ${BLAS_LIBRARIES})
+## Jaap added (but see MKL snippet below from FAISS CMake setup):
+#find_package(BLAS REQUIRED)
+#message(${BLAS_LIBRARIES})
+#target_link_libraries(${EXTENSION_NAME} ${BLAS_LIBRARIES})
 
 set(EXTENSION_SOURCES ${EXTENSION_SOURCES} ${FAISS_SOURCES})
+
+# We do... (really need other peoples build script) - says Arjen
+find_package(MKL)
+if(MKL_FOUND)
+  target_link_libraries(${EXTENSION_NAME} PRIVATE ${MKL_LIBRARIES})
+  # target_link_libraries(faiss_avx2 PRIVATE ${MKL_LIBRARIES})
+else()
+  find_package(BLAS REQUIRED)
+  target_link_libraries(${EXTENSION_NAME} PRIVATE ${BLAS_LIBRARIES})
+  # target_link_libraries(faiss_avx2 PRIVATE ${BLAS_LIBRARIES})
+    find_package(LAPACK REQUIRED)
+  target_link_libraries(${EXTENSION_NAME} PRIVATE ${LAPACK_LIBRARIES})
+  # target_link_libraries(faiss_avx2 PRIVATE ${LAPACK_LIBRARIES})
+endif()
 
 set(PARAMETERS "-warnings")
 build_loadable_extension(${TARGET_NAME} ${PARAMETERS} ${EXTENSION_SOURCES})
