@@ -39,6 +39,10 @@ add_dependencies(${EXTENSION_NAME} BuildOMP)
 
 target_link_libraries(${EXTENSION_NAME} ${OMP_STATIC_LIB})
 
+find_package(BLAS REQUIRED)
+message(${BLAS_LIBRARIES})
+target_link_libraries(${EXTENSION_NAME} ${BLAS_LIBRARIES})
+
 set(EXTENSION_SOURCES ${EXTENSION_SOURCES} ${FAISS_SOURCES})
 
 set(PARAMETERS "-warnings")
