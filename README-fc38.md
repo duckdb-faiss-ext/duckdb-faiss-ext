@@ -24,7 +24,6 @@ Modify the script to include `-DCMAKE_POSITION_INDEPENDENT_CODE=ON` on the `cmak
 
 ## Math Kernel Library:
 
-_Probably no longer needed:_
 Add necessary lines from FAISS cmake configs to `CMakeLists.txt`.
 
 _Necessary:_
