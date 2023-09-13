@@ -4,6 +4,7 @@ cmake_minimum_required(VERSION 2.8.12)
 set(TARGET_NAME faiss)
 
 set(EXTENSION_NAME ${TARGET_NAME}_extension)
+set(LOADABLE_EXTENSION_NAME ${TARGET_NAME}_loadable_extension)
 project(${TARGET_NAME})
 include_directories(src/include)
 
@@ -42,24 +43,24 @@ build_loadable_extension(${TARGET_NAME} ${PARAMETERS} ${EXTENSION_SOURCES})
 add_dependencies(${EXTENSION_NAME} BuildOMP)
 
 # link libraries
-target_link_libraries(${TARGET_NAME}_extension ${OMP_STATIC_LIB})
-target_link_libraries(${TARGET_NAME}_loadable_extension ${OMP_STATIC_LIB})
+target_link_libraries(${EXTENSION_NAME} ${OMP_STATIC_LIB})
+target_link_libraries(${LOADABLE_EXTENSION_NAME} ${OMP_STATIC_LIB})
 
 # We do... (really need other peoples build script) - says Arjen
 find_package(MKL)
 if(MKL_FOUND)
-  target_link_libraries(${TARGET_NAME}_extension PRIVATE ${MKL_LIBRARIES})
-  target_link_libraries(${TARGET_NAME}_loadable_extension PRIVATE ${MKL_LIBRARIES})
+  target_link_libraries(${EXTENSION_NAME} PRIVATE ${MKL_LIBRARIES})
+  target_link_libraries(${LOADABLE_EXTENSION_NAME} PRIVATE ${MKL_LIBRARIES})
   # target_link_libraries(faiss_avx2 PRIVATE ${MKL_LIBRARIES})
 else()
   find_package(BLAS REQUIRED)
-  target_link_libraries(${TARGET_NAME}_extension ${BLAS_LIBRARIES})
-  target_link_libraries(${TARGET_NAME}_loadable_extension ${BLAS_LIBRARIES})
+  target_link_libraries(${EXTENSION_NAME} ${BLAS_LIBRARIES})
+  target_link_libraries(${LOADABLE_EXTENSION_NAME} ${BLAS_LIBRARIES})
   # target_link_libraries(faiss_avx2 PRIVATE ${BLAS_LIBRARIES})
   
   find_package(LAPACK REQUIRED)
-  target_link_libraries(${TARGET_NAME}_extension ${LAPACK_LIBRARIES})
-  target_link_libraries(${TARGET_NAME}_loadable_extension ${LAPACK_LIBRARIES})
+  target_link_libraries(${EXTENSION_NAME} ${LAPACK_LIBRARIES})
+  target_link_libraries(${LOADABLE_EXTENSION_NAME} ${LAPACK_LIBRARIES})
   # target_link_libraries(faiss_avx2 PRIVATE ${LAPACK_LIBRARIES})
 endif()
 
