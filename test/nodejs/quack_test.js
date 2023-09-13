@@ -1,7 +1,7 @@
 var duckdb = require('../../duckdb/tools/nodejs');
 var assert = require('assert');
 
-describe(`quack extension`, () => {
+describe(`faiss extension`, () => {
     let db;
     let conn;
     before((done) => {

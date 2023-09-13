@@ -3,7 +3,7 @@ import pytest
 import os
 
 
-# Get a fresh connection to DuckDB with the quack extension binary loaded
+# Get a fresh connection to DuckDB with the faiss extension binary loaded
 @pytest.fixture
 def duckdb_conn():
     extension_binary = os.getenv('FAISS_EXTENSION_BINARY_PATH')
