@@ -1,7 +1,7 @@
-# Testing the quack extension
-This directory contains all the tests for the quack extension. The `sql` directory holds tests that are written as [SQLLogicTests](https://duckdb.org/dev/sqllogictest/intro.html). DuckDB aims to have most its tests in this format as SQL statements, so for the quack extension, this should probably be the goal too. However, client specific testing is also available.
+# Testing the faiss extension
+This directory contains all the tests for the faiss extension. The `sql` directory holds tests that are written as [SQLLogicTests](https://duckdb.org/dev/sqllogictest/intro.html).
 
-The root makefile contains targets to build and run all of these tests. To run the SQLLogicTests:
+The root makefile contains targets to build and run all of these sql tests. To run the SQLLogicTests:
 ```bash
 make test
 ```

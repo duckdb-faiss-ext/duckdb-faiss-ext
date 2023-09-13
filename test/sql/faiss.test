@@ -1,6 +1,6 @@
-# name: test/sql/quack.test
-# description: test quack extension
-# group: [quack]
+# name: test/sql/faiss.test
+# description: test faiss extension
+# group: [faiss]
 
 require faiss
 
