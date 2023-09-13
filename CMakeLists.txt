@@ -4,6 +4,7 @@ cmake_minimum_required(VERSION 2.8.12)
 set(TARGET_NAME faiss)
 
 set(EXTENSION_NAME ${TARGET_NAME}_extension)
+set(LOADABLE_EXTENSION_NAME ${TARGET_NAME}_loadable_extension)
 project(${TARGET_NAME})
 include_directories(src/include)
 
@@ -18,11 +19,11 @@ file(
         "faiss/faiss/utils/*.cpp"
         "faiss/faiss/utils/distances_fused/*.cpp")
 add_definitions(-DFINTEGER=int)
+set(EXTENSION_SOURCES ${EXTENSION_SOURCES} ${FAISS_SOURCES})
 
-add_library(${EXTENSION_NAME} STATIC ${EXTENSION_SOURCES})
 include_directories(faiss/ libomp/omp/build/runtime/src)
 
-# yay cmake this needs to be an absolute path
+# add omp as a target
 set(OMP_STATIC_LIB ${CMAKE_CURRENT_SOURCE_DIR}/libomp/omp/build/runtime/src/libomp.a)
 
 add_custom_command(
@@ -30,39 +31,42 @@ add_custom_command(
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         COMMAND sh ompconfigure)
 
-if(APPLE)
-  target_link_libraries(${EXTENSION_NAME} "-framework Accelerate")
-endif()
-
 add_custom_target(BuildOMP DEPENDS ${OMP_STATIC_LIB})
+
+# create extension targets
+build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
+
+set(PARAMETERS "-warnings")
+build_loadable_extension(${TARGET_NAME} ${PARAMETERS} ${EXTENSION_SOURCES})
+
+# build omp before the extension
 add_dependencies(${EXTENSION_NAME} BuildOMP)
 
-# Hannes: target_link_libraries(${EXTENSION_NAME} ${OMP_STATIC_LIB})
-target_link_libraries(${EXTENSION_NAME} PRIVATE ${OMP_STATIC_LIB})
-
-## Jaap added (but see MKL snippet below from FAISS CMake setup):
-#find_package(BLAS REQUIRED)
-#message(${BLAS_LIBRARIES})
-#target_link_libraries(${EXTENSION_NAME} ${BLAS_LIBRARIES})
-
-set(EXTENSION_SOURCES ${EXTENSION_SOURCES} ${FAISS_SOURCES})
+# link libraries
+target_link_libraries(${EXTENSION_NAME} ${OMP_STATIC_LIB})
+target_link_libraries(${LOADABLE_EXTENSION_NAME} ${OMP_STATIC_LIB})
 
 # We do... (really need other peoples build script) - says Arjen
 find_package(MKL)
 if(MKL_FOUND)
   target_link_libraries(${EXTENSION_NAME} PRIVATE ${MKL_LIBRARIES})
+  target_link_libraries(${LOADABLE_EXTENSION_NAME} PRIVATE ${MKL_LIBRARIES})
   # target_link_libraries(faiss_avx2 PRIVATE ${MKL_LIBRARIES})
 else()
   find_package(BLAS REQUIRED)
-  target_link_libraries(${EXTENSION_NAME} PRIVATE ${BLAS_LIBRARIES})
+  target_link_libraries(${EXTENSION_NAME} ${BLAS_LIBRARIES})
+  target_link_libraries(${LOADABLE_EXTENSION_NAME} ${BLAS_LIBRARIES})
   # target_link_libraries(faiss_avx2 PRIVATE ${BLAS_LIBRARIES})
-    find_package(LAPACK REQUIRED)
-  target_link_libraries(${EXTENSION_NAME} PRIVATE ${LAPACK_LIBRARIES})
+  
+  find_package(LAPACK REQUIRED)
+  target_link_libraries(${EXTENSION_NAME} ${LAPACK_LIBRARIES})
+  target_link_libraries(${LOADABLE_EXTENSION_NAME} ${LAPACK_LIBRARIES})
   # target_link_libraries(faiss_avx2 PRIVATE ${LAPACK_LIBRARIES})
 endif()
 
-set(PARAMETERS "-warnings")
-build_loadable_extension(${TARGET_NAME} ${PARAMETERS} ${EXTENSION_SOURCES})
+if(APPLE)
+  target_link_libraries(${EXTENSION_NAME} "-framework Accelerate")
+endif()
 
 install(
         TARGETS ${EXTENSION_NAME}
