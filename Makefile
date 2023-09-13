@@ -23,7 +23,9 @@ BUILD_FLAGS=-DEXTENSION_STATIC_BUILD=1 -DBUILD_TPCH_EXTENSION=1 -DBUILD_PARQUET_
 CLIENT_FLAGS :=
 
 # These flags will make DuckDB build the extension
-EXTENSION_FLAGS=-DDUCKDB_EXTENSION_NAMES="faiss" -DDUCKDB_EXTENSION_FAISS_PATH="$(PROJ_DIR)" -DDUCKDB_EXTENSION_FAISS_SHOULD_LINK="TRUE" -DDUCKDB_EXTENSION_FAISS_INCLUDE_PATH="$(PROJ_DIR)src/include"
+EXTENSION_NAME=FAISS
+EXTENSION_NAME_LOWER=faiss
+EXTENSION_FLAGS=-DDUCKDB_EXTENSION_NAMES="${EXTENSION_NAME_LOWER}" -DDUCKDB_EXTENSION_${EXTENSION_NAME}_PATH="$(PROJ_DIR)" -DDUCKDB_EXTENSION_${EXTENSION_NAME}_SHOULD_LINK="TRUE" -DDUCKDB_EXTENSION_${EXTENSION_NAME}_INCLUDE_PATH="$(PROJ_DIR)src/include"
 
 pull:
 	git submodule init
@@ -33,6 +35,7 @@ clean:
 	rm -rf build
 	rm -rf testext
 	cd duckdb && make clean
+	cd duckdb && make clean-python
 	rm -rf libomp
 
 # Main build
@@ -47,22 +50,16 @@ release:
 	cmake --build build/release --config RelWithDebInfo
 
 # Client build
-debug_js: CLIENT_FLAGS=-DBUILD_NODE=1 -DBUILD_JSON_EXTENSION=1
+debug_js: CLIENT_FLAGS=-DBUILD_NODE=1 -DDUCKDB_EXTENSION_${EXTENSION_NAME}_SHOULD_LINK=0
 debug_js: debug
-
-debug_r: CLIENT_FLAGS=-DBUILD_R=1
-debug_r: debug
 
 debug_python: CLIENT_FLAGS=-DBUILD_PYTHON=1 -DBUILD_JSON_EXTENSION=1 -DBUILD_FTS_EXTENSION=1 -DBUILD_TPCH_EXTENSION=1 -DBUILD_VISUALIZER_EXTENSION=1 -DBUILD_TPCDS_EXTENSION=1
 debug_python: debug
 
-release_js: CLIENT_FLAGS=-DBUILD_NODE=1 -DBUILD_JSON_EXTENSION=1
+release_js: CLIENT_FLAGS=-DBUILD_NODE=1 -DDUCKDB_EXTENSION_${EXTENSION_NAME}_SHOULD_LINK=0
 release_js: release
 
-release_r: CLIENT_FLAGS=-DBUILD_R=1
-release_r: release
-
-release_python: CLIENT_FLAGS=-DBUILD_PYTHON=1 -DBUILD_JSON_EXTENSION=1 -DBUILD_FTS_EXTENSION=1 -DBUILD_TPCH_EXTENSION=1 -DBUILD_VISUALIZER_EXTENSION=1 -DBUILD_TPCDS_EXTENSION=1
+release_python: CLIENT_FLAGS=-DBUILD_PYTHON=1 -DDUCKDB_EXTENSION_${EXTENSION_NAME}_SHOULD_LINK=0
 release_python: release
 
 # Main tests
@@ -75,19 +72,21 @@ test_debug: debug
 	./build/debug/test/unittest --test-dir . "[sql]"
 
 # Client tests
+DEBUG_EXT_PATH='$(PROJ_DIR)build/debug/extension/${EXTENSION_NAME_LOWER}/${EXTENSION_NAME_LOWER}.duckdb_extension'
+RELEASE_EXT_PATH='$(PROJ_DIR)build/release/extension/${EXTENSION_NAME_LOWER}/${EXTENSION_NAME_LOWER}.duckdb_extension'
 test_js: test_debug_js
 test_debug_js: debug_js
-	cd duckdb/tools/nodejs && npm run test-path -- "../../../test/nodejs/**/*.js"
+	cd duckdb/tools/nodejs && ${EXTENSION_NAME}_EXTENSION_BINARY_PATH=$(DEBUG_EXT_PATH) npm run test-path -- "../../../test/nodejs/**/*.js"
 
 test_release_js: release_js
-	cd duckdb/tools/nodejs && npm run test-path -- "../../../test/nodejs/**/*.js"
+	cd duckdb/tools/nodejs && ${EXTENSION_NAME}_EXTENSION_BINARY_PATH=$(RELEASE_EXT_PATH) npm run test-path -- "../../../test/nodejs/**/*.js"
 
 test_python: test_debug_python
 test_debug_python: debug_python
-	cd test/python && python3 -m pytest
+	cd test/python && ${EXTENSION_NAME}_EXTENSION_BINARY_PATH=$(DEBUG_EXT_PATH) python3 -m pytest
 
 test_release_python: release_python
-	cd test/python && python3 -m pytest
+	cd test/python && ${EXTENSION_NAME}_EXTENSION_BINARY_PATH=$(RELEASE_EXT_PATH) python3 -m pytest
 
 format:
 	find src/ -iname *.hpp -o -iname *.cpp | xargs clang-format --sort-includes=0 -style=file -i
