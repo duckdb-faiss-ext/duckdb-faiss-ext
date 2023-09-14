@@ -6,12 +6,13 @@ import os
 @pytest.fixture
 def duckdb_conn():
     extension_binary = os.getenv('FAISS_EXTENSION_BINARY_PATH')
-    if (extension_binary == ''):
-        raise Exception('Please make sure the `QUACK_EXTENSION_BINARY_PATH` is set to run the python tests')
+    if (extension_binary == None):
+        raise Exception('Please make sure the `FAISS_EXTENSION_BINARY_PATH` is set to run the python tests')
     conn = duckdb.connect('', config={'allow_unsigned_extensions': 'true'})
-    conn.execute(f"load '{extension_binary}'")
+    conn.execute(f"install '{extension_binary}'")
+    conn.execute(f"load faiss;")
     return conn
 
+# Very limited: just test whether faiss can create an index structure.
 def test_loading(duckdb_conn):
     duckdb_conn.execute("CALL faiss_create('flat8', 8, 'Flat');")
-    # just test that it works, and faiss is loaded. That is all
