@@ -6,7 +6,7 @@ import pickle
 # need an unsigned flag for now
 con = duckdb.connect(config = {'allow_unsigned_extensions': 'true'})
 con.sql("LOAD '../build/release/extension/faiss/faiss.duckdb_extension'")
-con.sql("CREATE TABLE input1 AS SELECT docid, vector AS emb FROM '../../pyseriniSearch/anserini/collections/msmarco-passage-openai-ada2/0.jsonl.gz'")
+con.sql("CREATE TABLE input1 AS SELECT docid, vector AS emb FROM 'msmarco-passage-openai-ada2/0.jsonl.gz'")
 
 vectors = con.from_query("SELECT * FROM input1")
 
