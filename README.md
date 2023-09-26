@@ -50,6 +50,20 @@ Javascript tests:
 make test_js
 ```
 
+## Running the conformance/accuracy tests
+
+For now, the accuracy tests are seperate from the normal tests, since they require a large download.
+
+To get download the required files run:
+```
+wget https://rgw.cs.uwaterloo.ca/pyserini/data/msmarco-passage-openai-ada2.tar -P conformanceTests/
+tar xvf conformanceTests/msmarco-passage-openai-ada2.tar -C conformanceTests/
+```
+and then you can run them:
+```
+make run_msmarco_queries
+```
+
 ## Distributing your extension
 Easy distribution of extensions built with this template is facilitated using a similar process used by DuckDB itself. 
 Binaries are generated for various versions/platforms allowing duckdb to automatically install the correct binary.
