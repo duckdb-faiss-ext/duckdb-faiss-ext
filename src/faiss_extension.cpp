@@ -228,7 +228,7 @@ struct SaveFunctionData : public TableFunctionData {
 };
 
 static unique_ptr<FunctionData> SaveBind(ClientContext &, TableFunctionBindInput &input,
-                                           vector<LogicalType> &return_types, vector<string> &names) {
+                                         vector<LogicalType> &return_types, vector<string> &names) {
 	auto result = make_uniq<SaveFunctionData>();
 	return_types.emplace_back(LogicalType::BOOLEAN);
 	names.emplace_back("Success");
@@ -264,7 +264,7 @@ struct LoadFunctionData : public TableFunctionData {
 };
 
 static unique_ptr<FunctionData> LoadBind(ClientContext &, TableFunctionBindInput &input,
-                                           vector<LogicalType> &return_types, vector<string> &names) {
+                                         vector<LogicalType> &return_types, vector<string> &names) {
 	auto result = make_uniq<LoadFunctionData>();
 	return_types.emplace_back(LogicalType::BOOLEAN);
 	names.emplace_back("Success");
@@ -316,18 +316,6 @@ static void LoadInternal(DatabaseInstance &instance) {
 	}
 
 	{
-		TableFunction save_function("faiss_save", {LogicalType::VARCHAR, LogicalType::VARCHAR}, SaveFunction, SaveBind);
-		CreateTableFunctionInfo add_info(save_function);
-		catalog.CreateTableFunction(*con.context, &add_info);
-	}
-
-	{
-		TableFunction load_function("faiss_load", {LogicalType::VARCHAR, LogicalType::VARCHAR}, LoadFunction, LoadBind);
-		CreateTableFunctionInfo add_info(load_function);
-		catalog.CreateTableFunction(*con.context, &add_info);
-	}
-
-	{
 		child_list_t<LogicalType> struct_children;
 		struct_children.emplace_back("rank", LogicalType::INTEGER);
 		struct_children.emplace_back("label", LogicalType::BIGINT);
@@ -345,6 +333,19 @@ static void LoadInternal(DatabaseInstance &instance) {
 		TableFunction create_func("faiss_destroy", {LogicalType::VARCHAR}, DestroyFunction, DestroyBind);
 		CreateTableFunctionInfo create_info(create_func);
 		catalog.CreateTableFunction(*con.context, &create_info);
+	}
+
+	// IO functions
+	{
+		TableFunction save_function("faiss_save", {LogicalType::VARCHAR, LogicalType::VARCHAR}, SaveFunction, SaveBind);
+		CreateTableFunctionInfo add_info(save_function);
+		catalog.CreateTableFunction(*con.context, &add_info);
+	}
+
+	{
+		TableFunction load_function("faiss_load", {LogicalType::VARCHAR, LogicalType::VARCHAR}, LoadFunction, LoadBind);
+		CreateTableFunctionInfo add_info(load_function);
+		catalog.CreateTableFunction(*con.context, &add_info);
 	}
 
 	con.Commit();
