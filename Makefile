@@ -88,11 +88,19 @@ test_debug_python: debug_python
 test_release_python: release_python
 	cd test/python && ${EXTENSION_NAME}_EXTENSION_BINARY_PATH=$(RELEASE_EXT_PATH) python3 -m pytest
 
+create_msmarco_index:
+	cd conformanceTests && python make_index.py
+
+conformanceTests/index: create_msmarco_index
+
+run_msmarco_queries: conformanceTests/index
+	cd conformanceTests && python execute_queries.py
+
 install_local: install_release_local
 install_release_local: release
-	echo "INSTALL \"build/release/extension/faiss/faiss.duckdb_extension\"" | build/release/duckdb 
+	echo "INSTALL \"$(RELEASE_EXT_PATH)\"" | build/release/duckdb 
 install_debug_local: debug
-	echo "INSTALL \"build/debug/extension/faiss/faiss.duckdb_extension\"" | build/release/duckdb 
+	echo "INSTALL \"$(DEBUG_EXT_PATH)\"" | build/release/duckdb 
 
 format:
 	find src/ -iname *.hpp -o -iname *.cpp | xargs clang-format --sort-includes=0 -style=file -i

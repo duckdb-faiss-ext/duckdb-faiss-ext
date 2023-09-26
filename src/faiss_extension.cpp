@@ -1,18 +1,18 @@
 #define DUCKDB_EXTENSION_MAIN
 
 #include "faiss_extension.hpp"
+
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
 #include "duckdb/function/scalar_function.hpp"
-
-#include <faiss/index_factory.h>
-
-#include <random>
-
-#include <duckdb/parser/parsed_data/create_scalar_function_info.hpp>
 #include "duckdb/parser/parsed_data/create_table_function_info.hpp"
 #include "duckdb/storage/object_cache.hpp"
+
+#include <duckdb/parser/parsed_data/create_scalar_function_info.hpp>
+#include <faiss/index_factory.h>
+#include <faiss/index_io.h>
+#include <random>
 
 namespace duckdb {
 
@@ -222,6 +222,80 @@ void SearchFunction(DataChunk &input, ExpressionState &state, Vector &output) {
 	}
 }
 
+struct SaveFunctionData : public TableFunctionData {
+	string key;
+	string filename;
+};
+
+static unique_ptr<FunctionData> SaveBind(ClientContext &, TableFunctionBindInput &input,
+                                           vector<LogicalType> &return_types, vector<string> &names) {
+	auto result = make_uniq<SaveFunctionData>();
+	return_types.emplace_back(LogicalType::BOOLEAN);
+	names.emplace_back("Success");
+
+	result->key = input.inputs[0].ToString();
+	result->filename = input.inputs[1].ToString();
+
+	return std::move(result);
+}
+
+// Duckdb has a loading and saving mechanism, but this is for tables.
+// Since faiss does not use duckdb tables for data storage we cannot use this integration.
+// It would be nice if there would be a mechanism to associate this with the database, and every
+// save of the database would also include the index. However, this is probably not
+// supported on all export formats, like parquet.
+static void SaveFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &) {
+	SaveFunctionData bind_data = data_p.bind_data->Cast<SaveFunctionData>();
+	auto &object_cache = ObjectCache::GetObjectCache(context);
+
+	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data.key);
+	if (!entry_ptr) {
+		throw InvalidInputException("Could not find index %s.", bind_data.key);
+	}
+
+	auto &entry = *entry_ptr;
+	faiss::Index *index = &*entry.index;
+	faiss::write_index(index, bind_data.filename.c_str());
+}
+
+struct LoadFunctionData : public TableFunctionData {
+	string key;
+	string filename;
+};
+
+static unique_ptr<FunctionData> LoadBind(ClientContext &, TableFunctionBindInput &input,
+                                           vector<LogicalType> &return_types, vector<string> &names) {
+	auto result = make_uniq<LoadFunctionData>();
+	return_types.emplace_back(LogicalType::BOOLEAN);
+	names.emplace_back("Success");
+
+	result->key = input.inputs[0].ToString();
+	result->filename = input.inputs[1].ToString();
+
+	return std::move(result);
+}
+
+// Duckdb has a loading and saving mechanism, but this is for tables.
+// Since faiss does not use duckdb tables for data storage we cannot use this integration.
+// It would be nice if there would be a mechanism to associate this with the database, and every
+// save of the database would also include the index. However, this is probably not
+// supported on all export formats, like parquet.
+static void LoadFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &) {
+	LoadFunctionData bind_data = data_p.bind_data->Cast<LoadFunctionData>();
+	auto &object_cache = ObjectCache::GetObjectCache(context);
+
+	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data.key);
+	if (entry_ptr) {
+		throw InvalidInputException("Could not find index %s.", bind_data.key);
+	}
+
+	auto entry = make_shared<IndexEntry>();
+	entry->index = unique_ptr<faiss::Index>(faiss::read_index(bind_data.filename.c_str()));
+	entry->dimension = entry->index->d;
+
+	object_cache.Put(bind_data.key, std::move(entry));
+}
+
 static void LoadInternal(DatabaseInstance &instance) {
 	Connection con(instance);
 	con.BeginTransaction();
@@ -238,6 +312,18 @@ static void LoadInternal(DatabaseInstance &instance) {
 		TableFunction add_function("faiss_add", {LogicalType::TABLE, LogicalType::VARCHAR}, nullptr, AddBind);
 		add_function.in_out_function = AddFunction;
 		CreateTableFunctionInfo add_info(add_function);
+		catalog.CreateTableFunction(*con.context, &add_info);
+	}
+
+	{
+		TableFunction save_function("faiss_save", {LogicalType::VARCHAR, LogicalType::VARCHAR}, SaveFunction, SaveBind);
+		CreateTableFunctionInfo add_info(save_function);
+		catalog.CreateTableFunction(*con.context, &add_info);
+	}
+
+	{
+		TableFunction load_function("faiss_load", {LogicalType::VARCHAR, LogicalType::VARCHAR}, LoadFunction, LoadBind);
+		CreateTableFunctionInfo add_info(load_function);
 		catalog.CreateTableFunction(*con.context, &add_info);
 	}
 
