@@ -88,7 +88,7 @@ test_debug_python: debug_python
 test_release_python: release_python
 	cd test/python && ${EXTENSION_NAME}_EXTENSION_BINARY_PATH=$(RELEASE_EXT_PATH) python3 -m pytest
 
-create_msmarco_index:
+create_msmarco_index: release_python
 	cd conformanceTests && ${EXTENSION_NAME}_EXTENSION_BINARY_PATH=$(RELEASE_EXT_PATH) python make_index.py
 
 conformanceTests/index: create_msmarco_index
