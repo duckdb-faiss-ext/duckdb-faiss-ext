@@ -5,21 +5,40 @@
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
+#include "duckdb/common/unique_ptr.hpp"
 #include "duckdb/function/scalar_function.hpp"
+#include "duckdb/function/table_function.hpp"
+#include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 #include "duckdb/parser/parsed_data/create_table_function_info.hpp"
 #include "duckdb/storage/object_cache.hpp"
 
-#include <duckdb/parser/parsed_data/create_scalar_function_info.hpp>
+#include <cstdint>
+#include <faiss/impl/FaissException.h>
 #include <faiss/index_factory.h>
 #include <faiss/index_io.h>
 #include <random>
+#include <shared_mutex>
 
 namespace duckdb {
 
 struct IndexEntry : ObjectCacheEntry {
 	unique_ptr<faiss::Index> index;
-	int dimension = 0;
-	vector<unique_ptr<float[]>> index_data;
+
+	// This is true if the index needs training. In the future,
+	// this can also be false if manual training enabled.
+	bool needs_training = true;
+
+	int dimension = 0; // This can easily be obtained from the index, doing only a pointer dereference.
+	vector<unique_ptr<float[]>> index_data; // Currently I do not see a use for this
+	unique_ptr<std::mutex>
+	    faiss_lock; // c++11 doesnt have a shared_mutex, introduced in c++14. duckdb is build with c++11
+
+	vector<size_t> size;
+
+	unique_ptr<std::mutex> add_lock;
+	// Store data for the add function (which can be done in parallel) and add all at once
+	vector<unique_ptr<float[]>> add_data;
+	vector<unique_ptr<faiss::idx_t[]>> add_labels;
 
 	static string ObjectType() {
 		return "faiss_index";
@@ -60,6 +79,9 @@ static void CreateFunction(ClientContext &context, TableFunctionInput &data_p, D
 	auto entry = make_shared<IndexEntry>();
 	entry->dimension = bind_data.dimension;
 	entry->index = unique_ptr<faiss::Index>(faiss::index_factory(entry->dimension, bind_data.description.c_str()));
+	entry->needs_training = !entry->index.get()->is_trained;
+	entry->faiss_lock = unique_ptr<std::mutex>(new std::mutex());
+	entry->add_lock = unique_ptr<std::mutex>(new std::mutex());
 
 	object_cache.Put(bind_data.key, std::move(entry));
 }
@@ -140,6 +162,10 @@ static unique_ptr<FunctionData> AddBind(ClientContext &, TableFunctionBindInput 
 	return result;
 }
 
+static unique_ptr<GlobalTableFunctionState> AddGlobalInit(ClientContext &context, TableFunctionInitInput &input) {
+	return make_uniq<GlobalTableFunctionState>();
+}
+
 static OperatorResultType AddFunction(ExecutionContext &context, TableFunctionInput &data_p, DataChunk &input,
                                       DataChunk &) {
 	auto bind_data = data_p.bind_data->Cast<AddData>();
@@ -149,31 +175,110 @@ static OperatorResultType AddFunction(ExecutionContext &context, TableFunctionIn
 		throw InvalidInputException("Could not find index %s.", bind_data.key);
 	}
 	auto &entry = *entry_ptr;
-
 	auto data_elements = input.size() * entry.dimension;
+
+	Vector label_cast_vec(LogicalType::BIGINT);
 	auto child_vec = ListVectorToFaiss(context.client, bind_data.has_labels ? input.data[1] : input.data[0],
 	                                   input.size(), entry.dimension);
 	auto child_ptr = FlatVector::GetData<float>(*child_vec);
+	auto label_ptr = FlatVector::GetData<int64_t>(label_cast_vec);
+
+	// If we do not need training, no need to use do it all at the end!
+	if (!entry.needs_training) {
+		entry.faiss_lock.get()->lock();
+		if (bind_data.has_labels) {
+			// TODO: Figure out if this commented code is usefull, seems like it's not to me
+			// Vector label_cast_vec(LogicalType::BIGINT);
+			// VectorOperations::Cast(context.client, input.data[0], label_cast_vec, input.size());
+			// label_cast_vec.Flatten(input.size());
+			entry.index->add_with_ids((faiss::idx_t)input.size(), child_ptr, label_ptr);
+		} else {
+			entry.index->add((faiss::idx_t)input.size(), child_ptr);
+		}
+		entry.faiss_lock.get()->unlock();
+		return OperatorResultType::NEED_MORE_INPUT;
+	}
+
 	auto index_data = unique_ptr<float[]>(new float[data_elements]);
-	memcpy(
-	    index_data.get(), child_ptr,
-	    data_elements *
-	        sizeof(float)); // TODO we should allocate this once, keep it around and then materialize the lists into it
+	unique_ptr<faiss::idx_t[]> label_data;
+	memcpy(index_data.get(), child_ptr, data_elements * sizeof(float));
 
 	if (bind_data.has_labels) {
-		Vector label_cast_vec(LogicalType::BIGINT);
-		VectorOperations::Cast(context.client, input.data[0], label_cast_vec, input.size());
-		label_cast_vec.Flatten(input.size());
-		auto label_ptr = FlatVector::GetData<int64_t>(label_cast_vec);
-		entry.index->add_with_ids((faiss::idx_t)input.size(), index_data.get(), label_ptr);
-	} else {
-		entry.index->add((faiss::idx_t)input.size(), index_data.get());
+		label_data = unique_ptr<faiss::idx_t[]>(new faiss::idx_t[data_elements]);
+		memcpy(label_data.get(), label_ptr, input.size() * sizeof(long));
 	}
-	entry.index_data.push_back(std::move(index_data));
+
+	entry.add_lock.get()->lock();
+	entry.add_data.push_back(std::move(index_data));
+	if (bind_data.has_labels) {
+		entry.add_labels.push_back(std::move(label_data));
+	}
+	entry.size.push_back(std::move(input.size()));
+	entry.add_lock.get()->unlock();
 
 	return OperatorResultType::NEED_MORE_INPUT;
 }
 
+static OperatorFinalizeResultType AddFinaliseFunction(ExecutionContext &context, TableFunctionInput &data_p,
+                                                      DataChunk &) {
+	auto bind_data = data_p.bind_data->Cast<AddData>();
+	auto &object_cache = ObjectCache::GetObjectCache(context.client);
+	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data.key);
+	if (!entry_ptr) {
+		throw InvalidInputException("Could not find index %s.", bind_data.key);
+	}
+
+	auto &entry = *entry_ptr;
+	entry.add_lock.get()->lock();
+	size_t total_elements = 0;
+	for (size_t size : entry.size) {
+		total_elements += size;
+	}
+
+	auto vector_data = unique_ptr<float[]>(new float[total_elements * entry.dimension]);
+	auto label_data = unique_ptr<faiss::idx_t[]>(new faiss::idx_t[total_elements]);
+	size_t offset = 0;
+	for (size_t i = 0; i < entry.size.size(); i++) {
+		size_t size = entry.size[i];
+
+		// Pointer aritmatic, fun!
+		memcpy(vector_data.get() + offset, entry.add_data[i].get(), size * entry.dimension * sizeof(float));
+		if (entry.add_data.size() == entry.add_labels.size()) {
+			memcpy(label_data.get() + offset, entry.add_labels[i].get(), size * sizeof(faiss::idx_t));
+		}
+		offset += size;
+	}
+	entry.add_lock.get()->unlock();
+
+	entry.faiss_lock.get()->lock();
+	try {
+		entry.index->train((faiss::idx_t)total_elements, vector_data.get());
+	} catch (faiss::FaissException exception) {
+		std::string msg = exception.msg;
+		if (msg.find("should be at least as large as number of clusters") != std::string::npos) {
+			throw InvalidInputException(
+			    "Index needs to be trained, but amount of datapoints is too small. Considere adding more data. (" +
+			        msg + ")",
+			    bind_data.key);
+		}
+	}
+
+	if (entry.add_data.size() == entry.add_labels.size()) {
+		// TODO: Figure out if this commented code is usefull, seems like it's not to me
+		// Vector label_cast_vec(LogicalType::BIGINT);
+		// VectorOperations::Cast(context.client, input.data[0], label_cast_vec, input.size());
+		// label_cast_vec.Flatten(input.size());
+		entry.index->add_with_ids((faiss::idx_t)total_elements, vector_data.get(), label_data.get());
+	} else {
+		entry.index->add((faiss::idx_t)total_elements, vector_data.get());
+	}
+	entry.faiss_lock.get()->unlock();
+
+	return OperatorFinalizeResultType::FINISHED;
+}
+
+// TODO: search could be a table function, which would require more copying but
+// could result in allowing duckdb to "ask for more" if needed
 void SearchFunction(DataChunk &input, ExpressionState &state, Vector &output) {
 	auto &object_cache = ObjectCache::GetObjectCache(state.GetContext());
 	auto key = input.data[0].GetValue(0).ToString();
@@ -195,7 +300,9 @@ void SearchFunction(DataChunk &input, ExpressionState &state, Vector &output) {
 	auto distances = unique_ptr<float[]>(new float[n_queries * n_results]);
 
 	// the actual search woo
+	entry.faiss_lock.get()->lock(); //  this should be a readlock once c++17 is supported
 	entry.index->search((faiss::idx_t)n_queries, child_ptr, n_results, distances.get(), labels.get());
+	entry.faiss_lock.get()->unlock();
 
 	ListVector::SetListSize(output, n_queries * n_results);
 	ListVector::Reserve(output, n_queries * n_results);
@@ -309,8 +416,10 @@ static void LoadInternal(DatabaseInstance &instance) {
 	}
 
 	{
-		TableFunction add_function("faiss_add", {LogicalType::TABLE, LogicalType::VARCHAR}, nullptr, AddBind);
+		TableFunction add_function("faiss_add", {LogicalType::TABLE, LogicalType::VARCHAR}, nullptr, AddBind,
+		                           AddGlobalInit);
 		add_function.in_out_function = AddFunction;
+		add_function.in_out_function_final = AddFinaliseFunction;
 		CreateTableFunctionInfo add_info(add_function);
 		catalog.CreateTableFunction(*con.context, &add_info);
 	}

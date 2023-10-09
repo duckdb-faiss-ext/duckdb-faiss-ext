@@ -89,7 +89,7 @@ test_release_python: release_python
 	cd test/python && ${EXTENSION_NAME}_EXTENSION_BINARY_PATH=$(RELEASE_EXT_PATH) python3 -m pytest
 
 create_msmarco_index:
-	cd conformanceTests && python make_index.py
+	cd conformanceTests && ${EXTENSION_NAME}_EXTENSION_BINARY_PATH=$(RELEASE_EXT_PATH) python make_index.py
 
 conformanceTests/index: create_msmarco_index
 
