@@ -34,6 +34,15 @@ D CALL faiss_create('flat8', 8, 'Flat');
 └─────────┘
 ```
 
+### Possible values for index type
+
+The index type is passed directly into `index_factory`.
+Refer to the following wiki pages for the value of this parameter:
+
+https://github.com/facebookresearch/faiss/wiki/The-index-factory
+
+https://github.com/facebookresearch/faiss/wiki/Faiss-indexes
+
 ## Running the tests
 Sql test:
 ```sh
@@ -48,6 +57,21 @@ make test_python
 Javascript tests:
 ```sh
 make test_js
+```
+
+## Running the conformance/accuracy tests
+
+For now, the accuracy tests are seperate from the normal tests, since they require a large download:
+
+```
+wget https://rgw.cs.uwaterloo.ca/pyserini/data/msmarco-passage-openai-ada2.tar -P conformanceTests/
+tar xvf conformanceTests/msmarco-passage-openai-ada2.tar -C conformanceTests/
+```
+
+Running the conformance tests:
+
+```
+make run_msmarco_queries
 ```
 
 ## Distributing your extension

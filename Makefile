@@ -53,7 +53,7 @@ release:
 debug_js: CLIENT_FLAGS=-DBUILD_NODE=1 -DDUCKDB_EXTENSION_${EXTENSION_NAME}_SHOULD_LINK=0
 debug_js: debug
 
-debug_python: CLIENT_FLAGS=-DBUILD_PYTHON=1 -DBUILD_JSON_EXTENSION=1 -DBUILD_FTS_EXTENSION=1 -DBUILD_TPCH_EXTENSION=1 -DBUILD_VISUALIZER_EXTENSION=1 -DBUILD_TPCDS_EXTENSION=1
+debug_python: CLIENT_FLAGS=-DBUILD_PYTHON=1 -DDUCKDB_EXTENSION_${EXTENSION_NAME}_SHOULD_LINK=0
 debug_python: debug
 
 release_js: CLIENT_FLAGS=-DBUILD_NODE=1 -DDUCKDB_EXTENSION_${EXTENSION_NAME}_SHOULD_LINK=0
@@ -88,11 +88,19 @@ test_debug_python: debug_python
 test_release_python: release_python
 	cd test/python && ${EXTENSION_NAME}_EXTENSION_BINARY_PATH=$(RELEASE_EXT_PATH) python3 -m pytest
 
+create_msmarco_index: release_python
+	cd conformanceTests && ${EXTENSION_NAME}_EXTENSION_BINARY_PATH=$(RELEASE_EXT_PATH) python make_index.py
+
+conformanceTests/index: create_msmarco_index
+
+run_msmarco_queries: conformanceTests/index
+	cd conformanceTests && python execute_queries.py
+
 install_local: install_release_local
 install_release_local: release
-	echo "INSTALL \"build/release/extension/faiss/faiss.duckdb_extension\"" | build/release/duckdb 
+	echo "INSTALL \"$(RELEASE_EXT_PATH)\"" | build/release/duckdb 
 install_debug_local: debug
-	echo "INSTALL \"build/debug/extension/faiss/faiss.duckdb_extension\"" | build/release/duckdb 
+	echo "INSTALL \"$(DEBUG_EXT_PATH)\"" | build/release/duckdb 
 
 format:
 	find src/ -iname *.hpp -o -iname *.cpp | xargs clang-format --sort-includes=0 -style=file -i
