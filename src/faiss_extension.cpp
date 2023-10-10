@@ -177,20 +177,21 @@ static OperatorResultType AddFunction(ExecutionContext &context, TableFunctionIn
 	auto &entry = *entry_ptr;
 	auto data_elements = input.size() * entry.dimension;
 
-	Vector label_cast_vec(LogicalType::BIGINT);
 	auto child_vec = ListVectorToFaiss(context.client, bind_data.has_labels ? input.data[1] : input.data[0],
 	                                   input.size(), entry.dimension);
 	auto child_ptr = FlatVector::GetData<float>(*child_vec);
-	auto label_ptr = FlatVector::GetData<int64_t>(label_cast_vec);
+
+	faiss::idx_t *label_ptr;
+	if (bind_data.has_labels) {
+		Vector label_cast_vec(LogicalType::BIGINT);
+		VectorOperations::Cast(context.client, input.data[0], label_cast_vec, input.size());
+		label_ptr = FlatVector::GetData<faiss::idx_t>(label_cast_vec);
+	}
 
 	// If we do not need training, no need to use do it all at the end!
 	if (!entry.needs_training) {
 		entry.faiss_lock.get()->lock();
 		if (bind_data.has_labels) {
-			// TODO: Figure out if this commented code is usefull, seems like it's not to me
-			// Vector label_cast_vec(LogicalType::BIGINT);
-			// VectorOperations::Cast(context.client, input.data[0], label_cast_vec, input.size());
-			// label_cast_vec.Flatten(input.size());
 			entry.index->add_with_ids((faiss::idx_t)input.size(), child_ptr, label_ptr);
 		} else {
 			entry.index->add((faiss::idx_t)input.size(), child_ptr);
@@ -268,10 +269,6 @@ static OperatorFinalizeResultType AddFinaliseFunction(ExecutionContext &context,
 	}
 
 	if (entry.add_data.size() == entry.add_labels.size()) {
-		// TODO: Figure out if this commented code is usefull, seems like it's not to me
-		// Vector label_cast_vec(LogicalType::BIGINT);
-		// VectorOperations::Cast(context.client, input.data[0], label_cast_vec, input.size());
-		// label_cast_vec.Flatten(input.size());
 		entry.index->add_with_ids((faiss::idx_t)total_elements, vector_data.get(), label_data.get());
 	} else {
 		entry.index->add((faiss::idx_t)total_elements, vector_data.get());
