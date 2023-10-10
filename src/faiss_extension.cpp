@@ -250,6 +250,10 @@ static OperatorFinalizeResultType AddFinaliseFunction(ExecutionContext &context,
 	}
 	entry.add_lock.get()->unlock();
 
+	if (entry.add_data.size() == 0) {
+		return OperatorFinalizeResultType::FINISHED;
+	}
+
 	entry.faiss_lock.get()->lock();
 	try {
 		entry.index->train((faiss::idx_t)total_elements, vector_data.get());
