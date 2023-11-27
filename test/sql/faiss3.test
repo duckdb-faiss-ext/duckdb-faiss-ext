@@ -1,0 +1,71 @@
+# name: test/sql/faiss.test
+# description: test faiss extension
+# group: [faiss]
+
+require faiss
+
+statement ok
+CALL faiss_create('flat8', 8, 'IDMap,Flat');
+
+statement ok
+CREATE TABLE training AS SELECT * FROM 'test/sql/training.csv';
+
+statement ok
+CREATE TABLE queries AS SELECT * FROM 'test/sql/training.csv';
+
+statement ok
+SELECT * FROM queries WHERE column0 > 10
+
+statement ok
+CALL faiss_add((SELECT column0, list_value(column1, column2, column3, column4, column5, column6, column7, column8) emb FROM training), 'flat8')
+
+query I
+SELECT UNNEST(faiss_search('flat8', 2, list_value(column1, column2, column3, column4, column5, column6, column7, column8))) FROM 'test/sql/queries.csv';
+----
+{'rank': 0, 'label': 102, 'distance': 0.15954435}
+{'rank': 1, 'label': 17, 'distance': 0.1742638}
+{'rank': 0, 'label': 35, 'distance': 0.3460947}
+{'rank': 1, 'label': 361, 'distance': 0.40792707}
+{'rank': 0, 'label': 745, 'distance': 0.20603882}
+{'rank': 1, 'label': 366, 'distance': 0.21217725}
+{'rank': 0, 'label': 10, 'distance': 0.14408338}
+{'rank': 1, 'label': 175, 'distance': 0.20221785}
+{'rank': 0, 'label': 218, 'distance': 0.24310562}
+{'rank': 1, 'label': 183, 'distance': 0.292426}
+{'rank': 0, 'label': 385, 'distance': 0.21773356}
+{'rank': 1, 'label': 13, 'distance': 0.23657995}
+{'rank': 0, 'label': 152, 'distance': 0.15137592}
+{'rank': 1, 'label': 235, 'distance': 0.20014608}
+{'rank': 0, 'label': 115, 'distance': 0.2584358}
+{'rank': 1, 'label': 228, 'distance': 0.33056957}
+{'rank': 0, 'label': 578, 'distance': 0.1384758}
+{'rank': 1, 'label': 301, 'distance': 0.14418106}
+{'rank': 0, 'label': 279, 'distance': 0.23176292}
+{'rank': 1, 'label': 371, 'distance': 0.2904194}
+
+query I
+SELECT UNNEST(faiss_search_filter('flat8', 2, list_value(column1, column2, column3, column4, column5, column6, column7, column8), 'column0>10')) FROM 'test/sql/queries.csv';
+----
+{'rank': 0, 'label': 102, 'distance': 0.15954435}
+{'rank': 1, 'label': 17, 'distance': 0.1742638}
+{'rank': 0, 'label': 35, 'distance': 0.3460947}
+{'rank': 1, 'label': 361, 'distance': 0.40792707}
+{'rank': 0, 'label': 745, 'distance': 0.20603882}
+{'rank': 1, 'label': 366, 'distance': 0.21217725}
+{'rank': 0, 'label': 175, 'distance': 0.20221785}
+{'rank': 1, 'label': 361, 'distance': 0.34853357}
+{'rank': 0, 'label': 218, 'distance': 0.24310562}
+{'rank': 1, 'label': 183, 'distance': 0.292426}
+{'rank': 0, 'label': 385, 'distance': 0.21773356}
+{'rank': 1, 'label': 13, 'distance': 0.23657995}
+{'rank': 0, 'label': 152, 'distance': 0.15137592}
+{'rank': 1, 'label': 235, 'distance': 0.20014608}
+{'rank': 0, 'label': 115, 'distance': 0.2584358}
+{'rank': 1, 'label': 228, 'distance': 0.33056957}
+{'rank': 0, 'label': 578, 'distance': 0.1384758}
+{'rank': 1, 'label': 301, 'distance': 0.14418106}
+{'rank': 0, 'label': 279, 'distance': 0.23176292}
+{'rank': 1, 'label': 371, 'distance': 0.2904194}
+
+statement ok
+CALL faiss_destroy('flat8');
