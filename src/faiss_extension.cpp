@@ -3,6 +3,8 @@
 #include "duckdb/common/vector.hpp"
 #include "duckdb/execution/column_binding_resolver.hpp"
 #include "duckdb/execution/execution_context.hpp"
+#include "duckdb/main/client_context.hpp"
+#include "duckdb/main/connection.hpp"
 #include "duckdb/parallel/interrupt.hpp"
 #include "duckdb/planner/expression.hpp"
 #include "duckdb/planner/logical_operator.hpp"
@@ -12,9 +14,11 @@
 #include <duckdb/common/optional_ptr.hpp>
 #include <duckdb/common/types/data_chunk.hpp>
 #include <duckdb/execution/expression_executor.hpp>
+#include <duckdb/main/database.hpp>
 #include <duckdb/parallel/thread_context.hpp>
 #include <duckdb/parser/query_node/select_node.hpp>
 #include <iostream>
+#include <ostream>
 #define DUCKDB_EXTENSION_MAIN
 
 #include "duckdb.hpp"
@@ -361,68 +365,27 @@ void SearchFunctionFilter(DataChunk &input, ExpressionState &state, Vector &outp
 	auto &entry = *entry_ptr;
 
 	auto n_results = input.data[1].GetValue(0).GetValue<int32_t>();
-	string filterExpression = "SELECT * FROM queries WHERE ";
-	filterExpression.append(input.data[3].GetValue(0).GetValue<string>());
 
-	Parser expressionParser = Parser();
-	expressionParser.ParseQuery(filterExpression);
-	auto &select = expressionParser.statements[0]->Cast<SelectStatement>();
-	if (select.node->type != QueryNodeType::SELECT_NODE) {
-		throw ParserException("Expected a single SELECT node");
-	}
-	shared_ptr<Binder> binder = Binder::CreateBinder(state.GetContext());
-	BoundStatement stm = binder->Bind(select.node->Cast<SelectNode>());
+	// use std::format in c++20, this is really ugly
+	std::stringstream ss;
+	// Unlike the normal nomenclature, unt1 means int of 1 byte, and int8 means 8 bytes.
+	ss << "SELECT CAST(" << input.data[3].GetValue(0).GetValue<string>() << " AS INT1) from training";
+	string filterExpression = ss.str();
 
-	// put all the column names in the resolver
-	ColumnBindingResolver visitor;
-	for (auto i = stm.plan->children[0]->children.rbegin(); i != stm.plan->children[0]->children.rend(); ++i) {
-		visitor.VisitOperator(*i->get());
-	}
-
-	// extract filter expression
-	unique_ptr<Expression> filterexpr = stm.plan->children[0]->expressions[0]->Copy();
-	visitor.VisitExpression(&filterexpr);
-
-	ExpressionExecutor executor(state.GetContext(), filterexpr.get());
-	SelectionVector sel(STANDARD_VECTOR_SIZE);
-	sel.Initialize();
-
-	// extract select operator
-	unique_ptr<LogicalOperator> selOp = stm.plan->children[0]->children[0]->Copy(state.GetContext());
-	PhysicalPlanGenerator generator = PhysicalPlanGenerator(state.GetContext());
-	unique_ptr<PhysicalOperator> selpp = generator.CreatePlan(selOp->Copy(state.GetContext()));
-	if (selpp->children.size() != 0) {
-		throw InvalidInputException("Currently only very basic select statements are supported.");
-	}
-
-	// Get data into chunk
-	DataChunk chunk;
-
-	ThreadContext thread_context(state.GetContext());
-	ExecutionContext econtext(state.GetContext(), thread_context, optional_ptr<Pipeline>());
-	unique_ptr<GlobalSourceState> gss = selpp->GetGlobalSourceState(state.GetContext());
-	unique_ptr<LocalSourceState> lss = selpp->GetLocalSourceState(econtext, *gss.get());
-	InterruptState interrupt_state;
-	OperatorSourceInput source_input {*gss, *lss, interrupt_state};
-	chunk.Initialize(state.GetAllocator(), selpp->types);
-	selpp->GetData(econtext, chunk, source_input);
-
-	// Filter
-	DataChunk bchunk;
-	vector<LogicalType> btypes = vector<LogicalType>();
-	btypes.push_back(LogicalType::BOOLEAN);
-	bchunk.Initialize(state.GetAllocator(), btypes);
-	executor.Execute(chunk, bchunk);
-	Vector data = bchunk.data[0];
+	shared_ptr<DatabaseInstance> db = state.GetContext().db;
+	shared_ptr<ClientContext> subcommection = make_shared<ClientContext>(db);
+	unique_ptr<QueryResult> result = subcommection->Query(filterExpression, true);
+	unique_ptr<DataChunk> chunk = result->Fetch();
+	Vector data = chunk->data[0];
 	uint8_t *bytes = data.GetData();
 
 	// TODO: use the ID from the table instead of assuming it is sequential
-	// TODO: use SIMD for this, as it will be very fast.
+	// TODO: use SIMD for this, as it will be very fast or (PEXT does 64 bits at a time, or 8 bools).
 	uint8_t mask[256] = {};
-	for (int i = 0; i < bchunk.size(); i++) {
+	for (int i = 0; i < chunk->size(); i++) {
 		int arrIndex = i / 8;
 		int u8Index = i % 8;
-		if (bytes[i]) {
+		if (data.GetValue(i).GetValue<uint8_t>()) {
 			mask[arrIndex] = mask[arrIndex] | (1 << u8Index);
 		}
 	}
@@ -434,7 +397,7 @@ void SearchFunctionFilter(DataChunk &input, ExpressionState &state, Vector &outp
 
 	// === normal search ===
 
-	// This should go in finalise or something
+	// This should go in finalise or something, if made into a table function
 	auto child_vec = ListVectorToFaiss(state.GetContext(), input.data[2], input.size(), entry.dimension);
 	auto child_ptr = FlatVector::GetData<float>(*child_vec);
 
