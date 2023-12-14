@@ -34,6 +34,7 @@ struct IndexEntry : ObjectCacheEntry {
 	// this can also be false if manual training enabled.
 	bool needs_training = true;
 	LABELSTATE custom_labels = UNDECIDED;
+	bool manual_training = false;
 
 	int dimension = 0; // This can easily be obtained from the index, doing only a pointer dereference.
 	vector<unique_ptr<float[]>> index_data; // Currently I do not see a use for this
@@ -355,6 +356,146 @@ void SearchFunction(DataChunk &input, ExpressionState &state, Vector &output) {
 	}
 }
 
+// Manual management functions
+
+struct MarkManualFunctionData : public TableFunctionData {
+	string key;
+};
+
+static unique_ptr<FunctionData> MarkManualBind(ClientContext &, TableFunctionBindInput &input,
+                                               vector<LogicalType> &return_types, vector<string> &names) {
+	auto result = make_uniq<MarkManualFunctionData>();
+	return_types.emplace_back(LogicalType::BOOLEAN);
+	names.emplace_back("Success");
+
+	result->key = input.inputs[0].ToString();
+	return std::move(result);
+}
+
+static void MarkManualFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &) {
+	auto &bind_data = data_p.bind_data->Cast<MarkManualFunctionData>();
+	auto &object_cache = ObjectCache::GetObjectCache(context);
+
+	shared_ptr<IndexEntry> entry_ptr = object_cache.Get<IndexEntry>(bind_data.key);
+	if (!entry_ptr) {
+		throw InvalidInputException("Could not find index %s.", bind_data.key);
+	}
+
+	entry_ptr.get()->add_lock.get()->lock();
+	entry_ptr.get()->needs_training = false;
+	entry_ptr.get()->manual_training = true;
+	entry_ptr.get()->add_data.clear();
+	entry_ptr.get()->add_labels.clear();
+	entry_ptr.get()->size.clear();
+	entry_ptr.get()->add_lock.get()->unlock();
+}
+
+struct TrainData : TableFunctionData {
+	string key;
+};
+
+static unique_ptr<FunctionData> TrainBind(ClientContext &, TableFunctionBindInput &input,
+                                          vector<LogicalType> &return_types, vector<string> &names) {
+	auto result = make_uniq<AddData>();
+
+	return_types.emplace_back(LogicalType::BOOLEAN);
+	names.emplace_back("Success");
+
+	result->key = input.inputs[1].ToString();
+
+	return result;
+}
+
+static unique_ptr<GlobalTableFunctionState> TrainGlobalInit(ClientContext &context, TableFunctionInitInput &input) {
+	return make_uniq<GlobalTableFunctionState>();
+}
+
+static OperatorResultType TrainFunction(ExecutionContext &context, TableFunctionInput &data_p, DataChunk &input,
+                                        DataChunk &) {
+	auto bind_data = data_p.bind_data->Cast<TrainData>();
+	auto &object_cache = ObjectCache::GetObjectCache(context.client);
+	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data.key);
+	if (!entry_ptr) {
+		throw InvalidInputException("Could not find index %s.", bind_data.key);
+	}
+	auto &entry = *entry_ptr;
+	if (!entry.manual_training) {
+		throw InvalidInputException("Trying to manually train index (%s) when manual training is not enabled on this "
+		                            "index. Use faiss_mark_manual to mark this index as manual.",
+		                            bind_data.key);
+	}
+
+	auto data_elements = input.size() * entry.dimension;
+
+	auto child_vec = ListVectorToFaiss(context.client, input.data[0], input.size(), entry.dimension);
+	auto child_ptr = FlatVector::GetData<float>(*child_vec);
+
+	auto index_data = unique_ptr<float[]>(new float[data_elements]);
+	unique_ptr<faiss::idx_t[]> label_data;
+	memcpy(index_data.get(), child_ptr, data_elements * sizeof(float));
+
+	entry.add_lock.get()->lock();
+	entry.add_data.push_back(std::move(index_data));
+	entry.size.push_back(std::move(input.size()));
+	entry.add_lock.get()->unlock();
+
+	return OperatorResultType::NEED_MORE_INPUT;
+}
+
+static OperatorFinalizeResultType TrainFinaliseFunction(ExecutionContext &context, TableFunctionInput &data_p,
+                                                        DataChunk &) {
+	TrainData bind_data = data_p.bind_data->Cast<TrainData>();
+	auto &object_cache = ObjectCache::GetObjectCache(context.client);
+	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data.key);
+	if (!entry_ptr) {
+		throw InvalidInputException("Could not find index %s.", bind_data.key);
+	}
+
+	auto &entry = *entry_ptr;
+	entry.add_lock.get()->lock();
+	size_t total_elements = 0;
+	for (size_t size : entry.size) {
+		total_elements += size;
+	}
+
+	auto vector_data = unique_ptr<float[]>(new float[total_elements * entry.dimension]);
+	size_t offset = 0;
+	for (size_t i = 0; i < entry.size.size(); i++) {
+		size_t size = entry.size[i];
+
+		// Pointer aritmatic, fun!
+		memcpy(vector_data.get() + offset, entry.add_data[i].get(), size * entry.dimension * sizeof(float));
+		offset += size;
+	}
+	entry.add_lock.get()->unlock();
+
+	if (entry.add_data.size() == 0) {
+		return OperatorFinalizeResultType::FINISHED;
+	}
+
+	entry.faiss_lock.get()->lock();
+	try {
+		entry.index->train((faiss::idx_t)total_elements, vector_data.get());
+	} catch (faiss::FaissException exception) {
+		std::string msg = exception.msg;
+		if (msg.find("should be at least as large as number of clusters") != std::string::npos) {
+			throw InvalidInputException(
+			    "Index needs to be trained, but amount of datapoints is too small. Considere adding more data. (" +
+			        msg + ")",
+			    bind_data.key);
+		}
+	}
+	entry.add_data.clear();
+	entry.add_labels.clear();
+	entry.size.clear();
+
+	entry.faiss_lock.get()->unlock();
+
+	return OperatorFinalizeResultType::FINISHED;
+}
+
+// IO functions
+
 struct SaveFunctionData : public TableFunctionData {
 	string key;
 	string filename;
@@ -468,6 +609,22 @@ static void LoadInternal(DatabaseInstance &instance) {
 		TableFunction create_func("faiss_destroy", {LogicalType::VARCHAR}, DestroyFunction, DestroyBind);
 		CreateTableFunctionInfo create_info(create_func);
 		catalog.CreateTableFunction(*con.context, &create_info);
+	}
+
+	// manual management functions
+	{
+		TableFunction mark_manual_func("faiss_mark_manual", {LogicalType::VARCHAR}, MarkManualFunction, MarkManualBind);
+		CreateTableFunctionInfo mark_manual_info(mark_manual_func);
+		catalog.CreateTableFunction(*con.context, &mark_manual_info);
+	}
+
+	{
+		TableFunction train_function("faiss_train", {LogicalType::TABLE, LogicalType::VARCHAR}, nullptr, TrainBind,
+		                             TrainGlobalInit);
+		train_function.in_out_function = TrainFunction;
+		train_function.in_out_function_final = TrainFinaliseFunction;
+		CreateTableFunctionInfo train_info(train_function);
+		catalog.CreateTableFunction(*con.context, &train_info);
 	}
 
 	// IO functions
