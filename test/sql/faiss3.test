@@ -1,0 +1,47 @@
+# name: test/sql/faiss.test
+# description: test faiss extension
+# group: [faiss]
+
+require faiss
+
+statement ok
+CALL faiss_create('hnsw8', 8, 'IVF4096_HNSW32,Flat');
+
+statement ok
+CALL faiss_mark_manual('hnsw8')
+
+# This is a non-sensical query, but the test is to make sure that manual training works, not that the results are good
+statement ok
+CALL faiss_train((SELECT list_value(column1, column2, column3, column4, column5, column6, column7, column8) emb FROM 'test/sql/training.csv' CROSS JOIN UNNEST([1, 2, 3, 4, 5])), 'hnsw8')
+
+statement ok
+CALL faiss_add((SELECT list_value(column1, column2, column3, column4, column5, column6, column7, column8) emb FROM 'test/sql/training.csv'), 'hnsw8')
+
+
+query I
+SELECT UNNEST(faiss_search('hnsw8', 2, list_value(column1, column2, column3, column4, column5, column6, column7, column8))).distance FROM 'test/sql/queries.csv';
+----
+0.15954435
+0.1742638
+3.4028235e+38
+3.4028235e+38
+0.20603882
+3.4028235e+38
+3.4028235e+38
+3.4028235e+38
+0.24310562
+0.41498858
+0.21773356
+3.4028235e+38
+0.20014608
+0.22976983
+3.4028235e+38
+3.4028235e+38
+0.1384758
+3.4028235e+38
+0.23176292
+3.4028235e+38
+
+
+statement ok
+CALL faiss_destroy('hnsw8');                                                                                                                                             
