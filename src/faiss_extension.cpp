@@ -21,12 +21,19 @@
 
 namespace duckdb {
 
+enum LABELSTATE {
+	UNDECIDED,
+	FALSE,
+	TRUE,
+};
+
 struct IndexEntry : ObjectCacheEntry {
 	unique_ptr<faiss::Index> index;
 
 	// This is true if the index needs training. In the future,
 	// this can also be false if manual training enabled.
 	bool needs_training = true;
+	LABELSTATE custom_labels = UNDECIDED;
 	bool manual_training = false;
 
 	int dimension = 0; // This can easily be obtained from the index, doing only a pointer dereference.
@@ -144,23 +151,41 @@ static unique_ptr<Vector> ListVectorToFaiss(ClientContext &context, Vector &inpu
 
 struct AddData : TableFunctionData {
 	string key;
-	bool has_labels = false;
 };
 
-static unique_ptr<FunctionData> AddBind(ClientContext &, TableFunctionBindInput &input,
-                                        vector<LogicalType> &return_types, vector<string> &names) {
-	auto result = make_uniq<AddData>();
-
-	if (input.input_table_names.size() == 2) { // we have labels
-		result->has_labels = true;
-	}
+static unique_ptr<FunctionData> AddBind(ClientContext &context, TableFunctionBindInput &input,
+                                        vector<LogicalType> &return_types, vector<string> &names) {	
+	auto bind_data = make_uniq<AddData>();
 
 	return_types.emplace_back(LogicalType::BOOLEAN);
 	names.emplace_back("Success");
 
-	result->key = input.inputs[1].ToString();
+	bind_data->key = input.inputs[1].ToString();
 
-	return result;
+	auto &object_cache = ObjectCache::GetObjectCache(context);
+	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data->key);
+	if (!entry_ptr) {
+		throw InvalidInputException("Could not find index %s.", bind_data->key);
+	}
+	if (entry_ptr.get()->custom_labels == UNDECIDED) {
+		if (input.input_table_names.size() == 2) { // we have labels
+			entry_ptr.get()->custom_labels = TRUE;
+		} else {
+			entry_ptr.get()->custom_labels = FALSE;
+		}
+	} else {
+		if (input.input_table_names.size() == 2 && entry_ptr.get()->custom_labels == FALSE) {
+			throw InvalidInputException(
+			    "Tried to insert data with labels, when index was previously added without labels. "
+			    "Cannot mix data with and without labels");
+		} else if (input.input_table_names.size() == 1 && entry_ptr.get()->custom_labels == TRUE) {
+			throw InvalidInputException(
+			    "Tried to insert data without labels, when index was previously added with labels. "
+			    "Cannot mix data with and without labels");
+		}
+	}
+
+	return bind_data;
 }
 
 static unique_ptr<GlobalTableFunctionState> AddGlobalInit(ClientContext &context, TableFunctionInitInput &input) {
@@ -178,21 +203,21 @@ static OperatorResultType AddFunction(ExecutionContext &context, TableFunctionIn
 	auto &entry = *entry_ptr;
 	auto data_elements = input.size() * entry.dimension;
 
-	auto child_vec = ListVectorToFaiss(context.client, bind_data.has_labels ? input.data[1] : input.data[0],
+	auto child_vec = ListVectorToFaiss(context.client, entry.custom_labels == TRUE ? input.data[1] : input.data[0],
 	                                   input.size(), entry.dimension);
 	auto child_ptr = FlatVector::GetData<float>(*child_vec);
 
 	faiss::idx_t *label_ptr;
-	if (bind_data.has_labels) {
+	if (entry.custom_labels == TRUE) {
 		Vector label_cast_vec(LogicalType::BIGINT);
 		VectorOperations::Cast(context.client, input.data[0], label_cast_vec, input.size());
 		label_ptr = FlatVector::GetData<faiss::idx_t>(label_cast_vec);
 	}
 
-	// If we do not need training, no need to use do it all at the end!
+	// If we do not need to do any training, we can add all the data instantly!
 	if (!entry.needs_training) {
 		entry.faiss_lock.get()->lock();
-		if (bind_data.has_labels) {
+		if (entry.custom_labels == TRUE) {
 			entry.index->add_with_ids((faiss::idx_t)input.size(), child_ptr, label_ptr);
 		} else {
 			entry.index->add((faiss::idx_t)input.size(), child_ptr);
@@ -205,14 +230,14 @@ static OperatorResultType AddFunction(ExecutionContext &context, TableFunctionIn
 	unique_ptr<faiss::idx_t[]> label_data;
 	memcpy(index_data.get(), child_ptr, data_elements * sizeof(float));
 
-	if (bind_data.has_labels) {
+	if (entry.custom_labels == TRUE) {
 		label_data = unique_ptr<faiss::idx_t[]>(new faiss::idx_t[data_elements]);
 		memcpy(label_data.get(), label_ptr, input.size() * sizeof(long));
 	}
 
 	entry.add_lock.get()->lock();
 	entry.add_data.push_back(std::move(index_data));
-	if (bind_data.has_labels) {
+	if (entry.custom_labels == TRUE) {
 		entry.add_labels.push_back(std::move(label_data));
 	}
 	entry.size.push_back(std::move(input.size()));
@@ -245,7 +270,7 @@ static OperatorFinalizeResultType AddFinaliseFunction(ExecutionContext &context,
 
 		// Pointer aritmatic, fun!
 		memcpy(vector_data.get() + offset, entry.add_data[i].get(), size * entry.dimension * sizeof(float));
-		if (entry.add_data.size() == entry.add_labels.size()) {
+		if (entry.custom_labels == TRUE) {
 			memcpy(label_data.get() + offset, entry.add_labels[i].get(), size * sizeof(faiss::idx_t));
 		}
 		offset += size;
@@ -269,7 +294,7 @@ static OperatorFinalizeResultType AddFinaliseFunction(ExecutionContext &context,
 		}
 	}
 
-	if (entry.add_data.size() == entry.add_labels.size()) {
+	if (entry.custom_labels == TRUE) {
 		entry.index->add_with_ids((faiss::idx_t)total_elements, vector_data.get(), label_data.get());
 	} else {
 		entry.index->add((faiss::idx_t)total_elements, vector_data.get());
