@@ -1,16 +1,20 @@
+#include "duckdb/common/preserved_error.hpp"
 #include "duckdb/common/types.hpp"
 #include "duckdb/common/types/selection_vector.hpp"
+#include "duckdb/common/types/vector.hpp"
 #include "duckdb/common/vector.hpp"
 #include "duckdb/execution/column_binding_resolver.hpp"
 #include "duckdb/execution/execution_context.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/main/connection.hpp"
+#include "duckdb/main/prepared_statement.hpp"
 #include "duckdb/parallel/interrupt.hpp"
 #include "duckdb/planner/expression.hpp"
 #include "duckdb/planner/logical_operator.hpp"
 #include "faiss/Index.h"
 #include "faiss/impl/IDSelector.h"
 
+#include <cstddef>
 #include <duckdb/common/optional_ptr.hpp>
 #include <duckdb/common/types/data_chunk.hpp>
 #include <duckdb/execution/expression_executor.hpp>
@@ -19,6 +23,8 @@
 #include <duckdb/parser/query_node/select_node.hpp>
 #include <iostream>
 #include <ostream>
+#include <string>
+#include <vector>
 #define DUCKDB_EXTENSION_MAIN
 
 #include "duckdb.hpp"
@@ -352,6 +358,30 @@ void SearchFunction(DataChunk &input, ExpressionState &state, Vector &output) {
 	}
 }
 
+// TODO: ensure that the input vectors are ordered in the query itself??
+void ProcessSelectionvector(unique_ptr<DataChunk> &chunk, std::vector<uint8_t> &output) {
+	std::cout << chunk->size() << std::endl;
+	Vector data = chunk->data[0];
+	Vector ids = chunk->data[1];
+	uint8_t *dataBytes = data.GetData();
+	uint64_t *idBytes = (uint64_t*)ids.GetData();
+
+	// TODO: check if it is sequential for optimised simd
+	// TODO: use SIMD for this, as it will be very fast or (PEXT does 64 bits at a time, or 8 bools).
+	for (int i = 0; i < chunk->size(); i++) {
+		// in case of flatvector we can directly access this
+		uint64_t id = idBytes[i];
+		if (output.size() <= id) {
+			output.resize(id);
+		}
+		int arrIndex = id / 8;
+		int u8Index = id % 8;
+		if (dataBytes[i]) {
+			output[arrIndex] = output[arrIndex] | (1 << u8Index);
+		}
+	}
+}
+
 // TODO: search could be a table function, which would require more copying but
 // could result in allowing duckdb to "ask for more" if needed
 void SearchFunctionFilter(DataChunk &input, ExpressionState &state, Vector &output) {
@@ -365,33 +395,32 @@ void SearchFunctionFilter(DataChunk &input, ExpressionState &state, Vector &outp
 	auto &entry = *entry_ptr;
 
 	auto n_results = input.data[1].GetValue(0).GetValue<int32_t>();
+	
 
+	// Once possible use prepared statements, currently not possible to use variables for tables (SELECT * FROM $1 doesnt parse)
 	// use std::format in c++20, this is really ugly
 	std::stringstream ss;
-	// Unlike the normal nomenclature, unt1 means int of 1 byte, and int8 means 8 bytes.
-	ss << "SELECT CAST(" << input.data[3].GetValue(0).GetValue<string>() << " AS INT1) from training";
+	// Unlike the normal nomenclature, (u)int1 means int of 1 byte, and (u)int8 means 8 bytes.
+	ss << "SELECT CAST(" << input.data[3].GetValue(0).GetValue<string>() << " AS INT1), CAST(" << input.data[4].GetValue(0).GetValue<string>() << " AS INT8) from " << input.data[5].GetValue(0).GetValue<string>();
+	
 	string filterExpression = ss.str();
-
+	
 	shared_ptr<DatabaseInstance> db = state.GetContext().db;
 	shared_ptr<ClientContext> subcommection = make_shared<ClientContext>(db);
 	unique_ptr<QueryResult> result = subcommection->Query(filterExpression, true);
-	unique_ptr<DataChunk> chunk = result->Fetch();
-	Vector data = chunk->data[0];
-	uint8_t *bytes = data.GetData();
 
-	// TODO: use the ID from the table instead of assuming it is sequential
-	// TODO: use SIMD for this, as it will be very fast or (PEXT does 64 bits at a time, or 8 bools).
-	uint8_t mask[256] = {};
-	for (int i = 0; i < chunk->size(); i++) {
-		int arrIndex = i / 8;
-		int u8Index = i % 8;
-		if (data.GetValue(i).GetValue<uint8_t>()) {
-			mask[arrIndex] = mask[arrIndex] | (1 << u8Index);
-		}
+	if (result->HasError()){
+		throw InvalidInputException("uable to execute filter query: %s", result->GetError());
+	}
+	vector<uint8_t> mask = vector<uint8_t>();
+	unique_ptr<DataChunk> chunk = unique_ptr<DataChunk>();
+	PreservedError error;
+	while (result->TryFetch(chunk, error) && chunk) {
+		ProcessSelectionvector(chunk, mask);
 	}
 
 	// create selector
-	faiss::IDSelectorBitmap selector = faiss::IDSelectorBitmap(256, mask);
+	faiss::IDSelectorBitmap selector = faiss::IDSelectorBitmap(mask.size(), mask.data());
 	faiss::SearchParameters searchParams;
 	searchParams.sel = &selector;
 
@@ -554,7 +583,7 @@ static void LoadInternal(DatabaseInstance &instance) {
 
 		ScalarFunction search_function_filter(
 		    "faiss_search_filter",
-		    {LogicalType::VARCHAR, LogicalType::INTEGER, LogicalType::LIST(LogicalType::ANY), LogicalType::VARCHAR},
+		    {LogicalType::VARCHAR, LogicalType::INTEGER, LogicalType::LIST(LogicalType::ANY), LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR},
 		    return_type, SearchFunctionFilter);
 		CreateScalarFunctionInfo search_info(search_function_filter);
 		catalog.CreateFunction(*con.context, search_info);

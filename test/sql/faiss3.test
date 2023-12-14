@@ -44,7 +44,7 @@ SELECT UNNEST(faiss_search('flat8', 2, list_value(column1, column2, column3, col
 {'rank': 1, 'label': 371, 'distance': 0.2904194}
 
 query I
-SELECT UNNEST(faiss_search_filter('flat8', 2, list_value(column1, column2, column3, column4, column5, column6, column7, column8), 'column0>10')) FROM 'test/sql/queries.csv';
+SELECT UNNEST(faiss_search_filter('flat8', 2, list_value(column1, column2, column3, column4, column5, column6, column7, column8), 'column0>10', 'column0')) FROM 'test/sql/queries.csv';
 ----
 {'rank': 0, 'label': 102, 'distance': 0.15954435}
 {'rank': 1, 'label': 17, 'distance': 0.1742638}
