@@ -1,4 +1,5 @@
 #include "duckdb/common/preserved_error.hpp"
+#include "duckdb/common/shared_ptr.hpp"
 #include "duckdb/common/types.hpp"
 #include "duckdb/common/types/selection_vector.hpp"
 #include "duckdb/common/types/vector.hpp"
@@ -12,6 +13,7 @@
 #include "duckdb/planner/expression.hpp"
 #include "duckdb/planner/logical_operator.hpp"
 #include "faiss/Index.h"
+#include "faiss/MetricType.h"
 #include "faiss/impl/IDSelector.h"
 
 #include <cstddef>
@@ -306,65 +308,67 @@ static OperatorFinalizeResultType AddFinaliseFunction(ExecutionContext &context,
 	return OperatorFinalizeResultType::FINISHED;
 }
 
+// Searches the faiss index contained in the IndexEntry using the given queries and inputdata and search params. The
+// results are stored in the outputvector as a struct-type of the form {rank, id, distance}.
+void searchIntoVector(ClientContext &ctx, IndexEntry &entry, Vector inputdata, size_t nQueries, size_t nResults,
+                      faiss::SearchParameters *searchParams, Vector &output) {
+	unique_ptr<Vector> child_vec = ListVectorToFaiss(ctx, inputdata, nQueries, entry.dimension);
+	auto child_ptr = FlatVector::GetData<float>(*child_vec);
+
+	unique_ptr<faiss::idx_t[]> labels = unique_ptr<faiss::idx_t[]>(new faiss::idx_t[nQueries * nResults]);
+	unique_ptr<float[]> distances = unique_ptr<float[]>(new float[nQueries * nResults]);
+
+	entry.faiss_lock.get()->lock(); //  this should be a readlock once c++17 is supported
+	entry.index->search((faiss::idx_t)nQueries, child_ptr, nResults, distances.get(), labels.get(), searchParams);
+	entry.faiss_lock.get()->unlock();
+
+	ListVector::SetListSize(output, nQueries * nResults);
+	ListVector::Reserve(output, nQueries * nResults);
+	list_entry_t *list_ptr = ListVector::GetData(output);
+	Vector &result_struct_vector = ListVector::GetEntry(output);
+	vector<unique_ptr<Vector>> &struct_entries = StructVector::GetEntries(result_struct_vector);
+	int *rank_ptr = FlatVector::GetData<int32_t>(*struct_entries[0]);
+	long *label_ptr = FlatVector::GetData<int64_t>(*struct_entries[1]);
+	float *distance_ptr = FlatVector::GetData<float>(*struct_entries[2]);
+
+	idx_t list_offset = 0;
+
+	for (idx_t row_idx = 0; row_idx < nQueries; row_idx++) {
+		list_ptr[row_idx].length = nResults;
+		list_ptr[row_idx].offset = list_offset;
+
+		for (idx_t res_idx = 0; res_idx < nResults; res_idx++) {
+			rank_ptr[list_offset + res_idx] = (int32_t)res_idx;
+			label_ptr[list_offset + res_idx] = labels[row_idx * nResults + res_idx];
+			distance_ptr[list_offset + res_idx] = distances[row_idx * nResults + res_idx];
+		}
+		list_offset += nResults;
+	}
+}
+
 // TODO: search could be a table function, which would require more copying but
 // could result in allowing duckdb to "ask for more" if needed
 void SearchFunction(DataChunk &input, ExpressionState &state, Vector &output) {
-	auto &object_cache = ObjectCache::GetObjectCache(state.GetContext());
-	auto key = input.data[0].GetValue(0).ToString();
+	string key = input.data[0].GetValue(0).ToString();
 
+	auto &object_cache = ObjectCache::GetObjectCache(state.GetContext());
 	auto entry_ptr = object_cache.Get<IndexEntry>(key);
 	if (!entry_ptr) {
 		throw InvalidInputException("Could not find index %s.", key);
 	}
-	auto &entry = *entry_ptr;
+	size_t nQueries = input.size();
+	size_t nResults = input.data[1].GetValue(0).GetValue<int32_t>();
+	faiss::SearchParameters searchParams;
 
-	auto n_results = input.data[1].GetValue(0).GetValue<int32_t>();
-
-	auto child_vec = ListVectorToFaiss(state.GetContext(), input.data[2], input.size(), entry.dimension);
-	auto child_ptr = FlatVector::GetData<float>(*child_vec);
-
-	auto n_queries = input.size();
-
-	auto labels = unique_ptr<faiss::idx_t[]>(new faiss::idx_t[n_queries * n_results]);
-	auto distances = unique_ptr<float[]>(new float[n_queries * n_results]);
-
-	// the actual search woo
-	entry.faiss_lock.get()->lock(); //  this should be a readlock once c++17 is supported
-	entry.index->search((faiss::idx_t)n_queries, child_ptr, n_results, distances.get(), labels.get());
-	entry.faiss_lock.get()->unlock();
-
-	ListVector::SetListSize(output, n_queries * n_results);
-	ListVector::Reserve(output, n_queries * n_results);
-
-	auto list_ptr = ListVector::GetData(output);
-	auto &result_struct_vector = ListVector::GetEntry(output);
-	auto &struct_entries = StructVector::GetEntries(result_struct_vector);
-	auto rank_ptr = FlatVector::GetData<int32_t>(*struct_entries[0]);
-	auto label_ptr = FlatVector::GetData<int64_t>(*struct_entries[1]);
-	auto distance_ptr = FlatVector::GetData<float>(*struct_entries[2]);
-
-	idx_t list_offset = 0;
-
-	for (idx_t row_idx = 0; row_idx < n_queries; row_idx++) {
-		list_ptr[row_idx].length = n_results;
-		list_ptr[row_idx].offset = list_offset;
-
-		for (idx_t res_idx = 0; res_idx < n_results; res_idx++) {
-			rank_ptr[list_offset + res_idx] = (int32_t)res_idx;
-			label_ptr[list_offset + res_idx] = labels[row_idx * n_results + res_idx];
-			distance_ptr[list_offset + res_idx] = distances[row_idx * n_results + res_idx];
-		}
-		list_offset += n_results;
-	}
+	searchIntoVector(state.GetContext(), *entry_ptr, input.data[2], nQueries, nResults, &searchParams, output);
 }
 
 // TODO: ensure that the input vectors are ordered in the query itself??
 void ProcessSelectionvector(unique_ptr<DataChunk> &chunk, std::vector<uint8_t> &output) {
-	std::cout << chunk->size() << std::endl;
 	Vector data = chunk->data[0];
 	Vector ids = chunk->data[1];
 	uint8_t *dataBytes = data.GetData();
-	uint64_t *idBytes = (uint64_t*)ids.GetData();
+	uint64_t *idBytes = (uint64_t *)ids.GetData();
 
 	// TODO: check if it is sequential for optimised simd
 	// TODO: use SIMD for this, as it will be very fast or (PEXT does 64 bits at a time, or 8 bools).
@@ -395,21 +399,22 @@ void SearchFunctionFilter(DataChunk &input, ExpressionState &state, Vector &outp
 	auto &entry = *entry_ptr;
 
 	auto n_results = input.data[1].GetValue(0).GetValue<int32_t>();
-	
 
-	// Once possible use prepared statements, currently not possible to use variables for tables (SELECT * FROM $1 doesnt parse)
-	// use std::format in c++20, this is really ugly
+	// Once possible use prepared statements, currently not possible to use variables for tables (SELECT * FROM $1
+	// doesnt parse) use std::format in c++20, this is really ugly
 	std::stringstream ss;
 	// Unlike the normal nomenclature, (u)int1 means int of 1 byte, and (u)int8 means 8 bytes.
-	ss << "SELECT CAST(" << input.data[3].GetValue(0).GetValue<string>() << " AS INT1), CAST(" << input.data[4].GetValue(0).GetValue<string>() << " AS INT8) from " << input.data[5].GetValue(0).GetValue<string>();
-	
+	ss << "SELECT CAST(" << input.data[3].GetValue(0).GetValue<string>() << " AS INT1), CAST("
+	   << input.data[4].GetValue(0).GetValue<string>() << " AS INT8) from "
+	   << input.data[5].GetValue(0).GetValue<string>();
+
 	string filterExpression = ss.str();
-	
+
 	shared_ptr<DatabaseInstance> db = state.GetContext().db;
 	shared_ptr<ClientContext> subcommection = make_shared<ClientContext>(db);
 	unique_ptr<QueryResult> result = subcommection->Query(filterExpression, true);
 
-	if (result->HasError()){
+	if (result->HasError()) {
 		throw InvalidInputException("uable to execute filter query: %s", result->GetError());
 	}
 	vector<uint8_t> mask = vector<uint8_t>();
@@ -425,44 +430,10 @@ void SearchFunctionFilter(DataChunk &input, ExpressionState &state, Vector &outp
 	searchParams.sel = &selector;
 
 	// === normal search ===
+	size_t nQueries = input.size();
+	size_t nResults = input.data[1].GetValue(0).GetValue<int32_t>();
 
-	// This should go in finalise or something, if made into a table function
-	auto child_vec = ListVectorToFaiss(state.GetContext(), input.data[2], input.size(), entry.dimension);
-	auto child_ptr = FlatVector::GetData<float>(*child_vec);
-
-	auto n_queries = input.size();
-
-	auto labels = unique_ptr<faiss::idx_t[]>(new faiss::idx_t[n_queries * n_results]);
-	auto distances = unique_ptr<float[]>(new float[n_queries * n_results]);
-
-	// the actual search woo
-	entry.faiss_lock.get()->lock(); //  this should be a readlock once c++17 is supported
-	entry.index->search((faiss::idx_t)n_queries, child_ptr, n_results, distances.get(), labels.get(), &searchParams);
-	entry.faiss_lock.get()->unlock();
-
-	ListVector::SetListSize(output, n_queries * n_results);
-	ListVector::Reserve(output, n_queries * n_results);
-
-	auto list_ptr = ListVector::GetData(output);
-	auto &result_struct_vector = ListVector::GetEntry(output);
-	auto &struct_entries = StructVector::GetEntries(result_struct_vector);
-	auto rank_ptr = FlatVector::GetData<int32_t>(*struct_entries[0]);
-	auto label_ptr = FlatVector::GetData<int64_t>(*struct_entries[1]);
-	auto distance_ptr = FlatVector::GetData<float>(*struct_entries[2]);
-
-	idx_t list_offset = 0;
-
-	for (idx_t row_idx = 0; row_idx < n_queries; row_idx++) {
-		list_ptr[row_idx].length = n_results;
-		list_ptr[row_idx].offset = list_offset;
-
-		for (idx_t res_idx = 0; res_idx < n_results; res_idx++) {
-			rank_ptr[list_offset + res_idx] = (int32_t)res_idx;
-			label_ptr[list_offset + res_idx] = labels[row_idx * n_results + res_idx];
-			distance_ptr[list_offset + res_idx] = distances[row_idx * n_results + res_idx];
-		}
-		list_offset += n_results;
-	}
+	searchIntoVector(state.GetContext(), entry, input.data[2], nQueries, nResults, &searchParams, output);
 }
 
 struct SaveFunctionData : public TableFunctionData {
@@ -581,10 +552,11 @@ static void LoadInternal(DatabaseInstance &instance) {
 		struct_children.emplace_back("distance", LogicalType::FLOAT);
 		auto return_type = LogicalType::LIST(LogicalType::STRUCT(std::move(struct_children)));
 
-		ScalarFunction search_function_filter(
-		    "faiss_search_filter",
-		    {LogicalType::VARCHAR, LogicalType::INTEGER, LogicalType::LIST(LogicalType::ANY), LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR},
-		    return_type, SearchFunctionFilter);
+		ScalarFunction search_function_filter("faiss_search_filter",
+		                                      {LogicalType::VARCHAR, LogicalType::INTEGER,
+		                                       LogicalType::LIST(LogicalType::ANY), LogicalType::VARCHAR,
+		                                       LogicalType::VARCHAR, LogicalType::VARCHAR},
+		                                      return_type, SearchFunctionFilter);
 		CreateScalarFunctionInfo search_info(search_function_filter);
 		catalog.CreateFunction(*con.context, search_info);
 	}
