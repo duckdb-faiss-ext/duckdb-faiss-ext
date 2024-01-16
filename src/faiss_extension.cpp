@@ -13,6 +13,8 @@
 #include "duckdb/planner/expression.hpp"
 #include "duckdb/planner/logical_operator.hpp"
 #include "faiss/Index.h"
+#include "faiss/IndexIDMap.h"
+#include "faiss/IndexIVF.h"
 #include "faiss/MetricType.h"
 #include "faiss/impl/IDSelector.h"
 
@@ -346,6 +348,23 @@ void searchIntoVector(ClientContext &ctx, IndexEntry &entry, Vector inputdata, s
 	}
 }
 
+unique_ptr<faiss::SearchParameters> createSearchParameters(faiss::Index *index, faiss::IDSelector *selector) {
+	faiss::IndexIDMap *idmap = dynamic_cast<faiss::IndexIDMap *>(index);
+	if (idmap) {
+		return createSearchParameters(idmap->index, selector);
+	}
+	void *ivf = dynamic_cast<faiss::IndexIVF *>(index);
+	if (ivf) {
+		unique_ptr<faiss::SearchParametersIVF> searchParams = make_uniq<faiss::SearchParametersIVF>();
+		searchParams->sel = selector;
+		return searchParams;
+	}
+
+	unique_ptr<faiss::SearchParameters> searchParams = unique_ptr<faiss::SearchParameters>();
+	searchParams->sel = selector;
+	return searchParams;
+}
+
 // TODO: search could be a table function, which would require more copying but
 // could result in allowing duckdb to "ask for more" if needed
 void SearchFunction(DataChunk &input, ExpressionState &state, Vector &output) {
@@ -358,9 +377,9 @@ void SearchFunction(DataChunk &input, ExpressionState &state, Vector &output) {
 	}
 	size_t nQueries = input.size();
 	size_t nResults = input.data[1].GetValue(0).GetValue<int32_t>();
-	faiss::SearchParameters searchParams;
+	unique_ptr<faiss::SearchParameters> searchParams = createSearchParameters(entry_ptr->index.get(), NULL);
 
-	searchIntoVector(state.GetContext(), *entry_ptr, input.data[2], nQueries, nResults, &searchParams, output);
+	searchIntoVector(state.GetContext(), *entry_ptr, input.data[2], nQueries, nResults, searchParams.get(), output);
 }
 
 // TODO: ensure that the input vectors are ordered in the query itself??
@@ -426,14 +445,13 @@ void SearchFunctionFilter(DataChunk &input, ExpressionState &state, Vector &outp
 
 	// create selector
 	faiss::IDSelectorBitmap selector = faiss::IDSelectorBitmap(mask.size(), mask.data());
-	faiss::SearchParameters searchParams;
-	searchParams.sel = &selector;
+	unique_ptr<faiss::SearchParameters> searchParams = createSearchParameters(entry.index.get(), &selector);
 
 	// === normal search ===
 	size_t nQueries = input.size();
 	size_t nResults = input.data[1].GetValue(0).GetValue<int32_t>();
 
-	searchIntoVector(state.GetContext(), entry, input.data[2], nQueries, nResults, &searchParams, output);
+	searchIntoVector(state.GetContext(), entry, input.data[2], nQueries, nResults, searchParams.get(), output);
 }
 
 struct SaveFunctionData : public TableFunctionData {
