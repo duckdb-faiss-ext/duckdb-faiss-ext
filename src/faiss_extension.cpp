@@ -449,11 +449,11 @@ void ProcessSelectionvector(unique_ptr<DataChunk> &chunk, std::vector<uint8_t> &
 	for (int i = 0; i < chunk->size(); i++) {
 		// in case of flatvector we can directly access this
 		uint64_t id = idBytes[i];
-		if (output.size() <= id) {
-			output.resize(id);
-		}
 		int arrIndex = id / 8;
 		int u8Index = id % 8;
+		if (output.size() <= arrIndex) {
+			output.resize(arrIndex + 1);
+		}
 		if (dataBytes[i]) {
 			output[arrIndex] = output[arrIndex] | (1 << u8Index);
 		}
@@ -471,8 +471,6 @@ void SearchFunctionFilter(DataChunk &input, ExpressionState &state, Vector &outp
 		throw InvalidInputException("Could not find index %s.", key);
 	}
 	auto &entry = *entry_ptr;
-
-	auto n_results = input.data[1].GetValue(0).GetValue<int32_t>();
 
 	// Once possible use prepared statements, currently not possible to use variables for tables (SELECT * FROM $1
 	// doesnt parse) use std::format in c++20, this is really ugly
