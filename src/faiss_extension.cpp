@@ -238,6 +238,10 @@ static OperatorResultType AddFunction(ExecutionContext &context, TableFunctionIn
 		                            "loaded from disk and don't need training.");
 	}
 
+	if (bind_data.has_labels && entry.add_data.size() != entry.add_labels.size()) {
+		throw InvalidInputException("Adding with labels, but index was previously added to without labels");
+	}
+
 	auto data_elements = input.size() * entry.dimension;
 
 	auto child_vec = ListVectorToFaiss(context.client, bind_data.has_labels ? input.data[1] : input.data[0],
@@ -254,10 +258,16 @@ static OperatorResultType AddFunction(ExecutionContext &context, TableFunctionIn
 	// If we do not need training, no need to use do it all at the end!
 	if (!entry.needs_training) {
 		entry.faiss_lock.get()->lock();
-		if (bind_data.has_labels) {
-			entry.index->add_with_ids((faiss::idx_t)input.size(), child_ptr, label_ptr);
-		} else {
-			entry.index->add((faiss::idx_t)input.size(), child_ptr);
+		// Yay error handling!
+		try {
+			if (bind_data.has_labels) {
+				entry.index->add_with_ids((faiss::idx_t)input.size(), child_ptr, label_ptr);
+			} else {
+				entry.index->add((faiss::idx_t)input.size(), child_ptr);
+			}
+		} catch (faiss::FaissException e) {
+			entry.faiss_lock.get()->unlock();
+			throw InvalidInputException("Unable to add data: %s", e.what());
 		}
 		entry.faiss_lock.get()->unlock();
 		return OperatorResultType::NEED_MORE_INPUT;
@@ -324,7 +334,7 @@ static OperatorFinalizeResultType AddFinaliseFunction(ExecutionContext &context,
 		size_t dataBytes = size * entry.dimension * sizeof(float);
 		// Pointer aritmatic, fun!
 		memcpy(&all_vector_data[offset * entry.dimension], srcData, dataBytes);
-		if (entry.add_data.size() == entry.add_labels.size()) {
+		if (bind_data.has_labels) {
 			faiss::idx_t *srcLabels = entry.add_labels[i].get();
 			size_t labelBytes = size * sizeof(faiss::idx_t);
 			memcpy(&all_label_data[offset], srcLabels, labelBytes);
@@ -347,6 +357,8 @@ static OperatorFinalizeResultType AddFinaliseFunction(ExecutionContext &context,
 			    "Index needs to be trained, but amount of datapoints is too small. Considere adding more data. (" +
 			        msg + ")",
 			    bind_data.key);
+		} else {
+			throw InvalidInputException("Error occured while training index: %s", msg);
 		}
 	}
 
@@ -355,7 +367,7 @@ static OperatorFinalizeResultType AddFinaliseFunction(ExecutionContext &context,
 	float *new_vector_data = &all_vector_data.get()[added_elements * entry.dimension];
 	faiss::idx_t *new_label_data = &all_label_data.get()[added_elements];
 
-	if (entry.add_data.size() == entry.add_labels.size()) {
+	if (bind_data.has_labels) {
 		entry.index->add_with_ids(new_elements, new_vector_data, new_label_data);
 	} else {
 		entry.index->add(new_elements, new_vector_data);
