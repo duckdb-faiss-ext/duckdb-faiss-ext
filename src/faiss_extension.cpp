@@ -59,6 +59,12 @@ struct IndexEntry : ObjectCacheEntry {
 	// This is true if the index needs training. In the future,
 	// this can also be false if manual training enabled.
 	bool needs_training = true;
+	// isMutable reflects whether it is possible to add data to this
+	// index while staying consistent.
+	// If an index is loaded from disk, all meta-data is lost, so for safety
+	// we assume that it is not possible to add any data, unless we know that it still
+	// needs training (and thus doesnt have any data yet).needs_training
+	bool isMutable = true;
 
 	int dimension = 0; // This can easily be obtained from the index, doing only a pointer dereference.
 	vector<unique_ptr<float[]>> index_data; // Currently I do not see a use for this
@@ -226,6 +232,12 @@ static OperatorResultType AddFunction(ExecutionContext &context, TableFunctionIn
 		throw InvalidInputException("Could not find index %s.", bind_data.key);
 	}
 	auto &entry = *entry_ptr;
+
+	if (!entry.isMutable) {
+		throw InvalidInputException("Attempted to add to an immutable index. Indexes are marked immutable if they are "
+		                            "loaded from disk and don't need training.");
+	}
+
 	auto data_elements = input.size() * entry.dimension;
 
 	auto child_vec = ListVectorToFaiss(context.client, bind_data.has_labels ? input.data[1] : input.data[0],
@@ -567,6 +579,10 @@ static void LoadFunction(ClientContext &context, TableFunctionInput &data_p, Dat
 	auto entry = make_shared<IndexEntry>();
 	entry->index = unique_ptr<faiss::Index>(faiss::read_index(bind_data.filename.c_str()));
 	entry->dimension = entry->index->d;
+	entry->needs_training = !entry->index.get()->is_trained;
+	entry->faiss_lock = unique_ptr<std::mutex>(new std::mutex());
+	entry->add_lock = unique_ptr<std::mutex>(new std::mutex());
+	entry->isMutable = entry->needs_training;
 
 	object_cache.Put(bind_data.key, std::move(entry));
 }
