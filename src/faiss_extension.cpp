@@ -122,7 +122,8 @@ static void CreateFunction(ClientContext &context, TableFunctionInput &data_p, D
 
 	auto entry = make_shared<IndexEntry>();
 	entry->dimension = bind_data.dimension;
-	entry->index = unique_ptr<faiss::Index>(faiss::index_factory(entry->dimension, bind_data.description.c_str()));
+	entry->index = unique_ptr<faiss::Index>(
+	    faiss::index_factory(entry->dimension, bind_data.description.c_str(), faiss::METRIC_INNER_PRODUCT));
 	entry->needs_training = !entry->index.get()->is_trained;
 	entry->faiss_lock = unique_ptr<std::mutex>(new std::mutex());
 	entry->add_lock = unique_ptr<std::mutex>(new std::mutex());
