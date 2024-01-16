@@ -75,6 +75,8 @@ struct IndexEntry : ObjectCacheEntry {
 	vector<unique_ptr<float[]>> add_data;
 	vector<unique_ptr<faiss::idx_t[]>> add_labels;
 	vector<size_t> size;
+	// keeps track of how many chunks have been added
+	size_t added = 0;
 
 	static string ObjectType() {
 		return "faiss_index";
@@ -289,17 +291,31 @@ static OperatorFinalizeResultType AddFinaliseFunction(ExecutionContext &context,
 	for (size_t size : entry.size) {
 		total_elements += size;
 	}
+	size_t added_elements = 0;
+	for (size_t i = 0; i < entry.added; i++) {
+		added_elements += entry.size[i];
+	}
+	if (added_elements == total_elements) {
+		entry.add_lock.get()->unlock();
+		return OperatorFinalizeResultType::FINISHED;
+	}
+	// We will mark these as added already, so concurrent calls to
+	// AddFinaliseFunction already these are taken care of
+	entry.added = entry.size.size();
 
-	auto vector_data = unique_ptr<float[]>(new float[total_elements * entry.dimension]);
-	auto label_data = unique_ptr<faiss::idx_t[]>(new faiss::idx_t[total_elements]);
+	auto all_vector_data = unique_ptr<float[]>(new float[total_elements * entry.dimension]);
+	auto all_label_data = unique_ptr<faiss::idx_t[]>(new faiss::idx_t[total_elements]);
 	size_t offset = 0;
 	for (size_t i = 0; i < entry.size.size(); i++) {
 		size_t size = entry.size[i];
-
+		float *srcData = entry.add_data[i].get();
+		size_t dataBytes = size * entry.dimension * sizeof(float);
 		// Pointer aritmatic, fun!
-		memcpy(vector_data.get() + offset, entry.add_data[i].get(), size * entry.dimension * sizeof(float));
+		memcpy(&all_vector_data[offset * entry.dimension], srcData, dataBytes);
 		if (entry.add_data.size() == entry.add_labels.size()) {
-			memcpy(label_data.get() + offset, entry.add_labels[i].get(), size * sizeof(faiss::idx_t));
+			faiss::idx_t *srcLabels = entry.add_labels[i].get();
+			size_t labelBytes = size * sizeof(faiss::idx_t);
+			memcpy(&all_label_data[offset], srcLabels, labelBytes);
 		}
 		offset += size;
 	}
@@ -311,7 +327,7 @@ static OperatorFinalizeResultType AddFinaliseFunction(ExecutionContext &context,
 
 	entry.faiss_lock.get()->lock();
 	try {
-		entry.index->train((faiss::idx_t)total_elements, vector_data.get());
+		entry.index->train((faiss::idx_t)total_elements, all_vector_data.get());
 	} catch (faiss::FaissException exception) {
 		std::string msg = exception.msg;
 		if (msg.find("should be at least as large as number of clusters") != std::string::npos) {
@@ -322,10 +338,15 @@ static OperatorFinalizeResultType AddFinaliseFunction(ExecutionContext &context,
 		}
 	}
 
+	// We only add data that havn't been added yet, so we skip the data already added
+	faiss::idx_t new_elements = total_elements - added_elements;
+	float *new_vector_data = &all_vector_data.get()[added_elements * entry.dimension];
+	faiss::idx_t *new_label_data = &all_label_data.get()[added_elements];
+
 	if (entry.add_data.size() == entry.add_labels.size()) {
-		entry.index->add_with_ids((faiss::idx_t)total_elements, vector_data.get(), label_data.get());
+		entry.index->add_with_ids(new_elements, new_vector_data, new_label_data);
 	} else {
-		entry.index->add((faiss::idx_t)total_elements, vector_data.get());
+		entry.index->add(new_elements, new_vector_data);
 	}
 	entry.faiss_lock.get()->unlock();
 
