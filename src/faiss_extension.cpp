@@ -65,12 +65,16 @@ struct IndexEntry : ObjectCacheEntry {
 	unique_ptr<std::mutex>
 	    faiss_lock; // c++11 doesnt have a shared_mutex, introduced in c++14. duckdb is build with c++11
 
-	vector<size_t> size;
-
+	// This keeps track of how many threads are currently adding, this is to make sure that we
+	// only train/push to faiss when there are no threads adding more data. Does not guarantee
+	// that all data has been added, as some threads may just have not been started yet
+	std::atomic_uint64_t currently_adding;
 	unique_ptr<std::mutex> add_lock;
-	// Store data for the add function (which can be done in parallel) and add all at once
+	// Store chunks for the add function (which can be done in parallel)
+	// to be added all at once at the end
 	vector<unique_ptr<float[]>> add_data;
 	vector<unique_ptr<faiss::idx_t[]>> add_labels;
+	vector<size_t> size;
 
 	static string ObjectType() {
 		return "faiss_index";
@@ -198,6 +202,19 @@ static unique_ptr<GlobalTableFunctionState> AddGlobalInit(ClientContext &context
 	return make_uniq<GlobalTableFunctionState>();
 }
 
+static unique_ptr<LocalTableFunctionState> AddLocalInit(ExecutionContext &context, TableFunctionInitInput &data_p,
+                                                        GlobalTableFunctionState *global_state) {
+	auto bind_data = data_p.bind_data->Cast<AddData>();
+	auto &object_cache = ObjectCache::GetObjectCache(context.client);
+	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data.key);
+	if (!entry_ptr) {
+		throw InvalidInputException("Could not find index %s.", bind_data.key);
+	}
+	auto &entry = *entry_ptr;
+	entry.currently_adding++;
+	return make_uniq<LocalTableFunctionState>();
+}
+
 static OperatorResultType AddFunction(ExecutionContext &context, TableFunctionInput &data_p, DataChunk &input,
                                       DataChunk &) {
 	auto bind_data = data_p.bind_data->Cast<AddData>();
@@ -263,6 +280,11 @@ static OperatorFinalizeResultType AddFinaliseFunction(ExecutionContext &context,
 
 	auto &entry = *entry_ptr;
 	entry.add_lock.get()->lock();
+	entry.currently_adding--;
+	if (entry.currently_adding != 0) {
+		entry.add_lock.get()->unlock();
+		return OperatorFinalizeResultType::FINISHED;
+	}
 	size_t total_elements = 0;
 	for (size_t size : entry.size) {
 		total_elements += size;
@@ -542,7 +564,7 @@ static void LoadInternal(DatabaseInstance &instance) {
 
 	{
 		TableFunction add_function("faiss_add", {LogicalType::TABLE, LogicalType::VARCHAR}, nullptr, AddBind,
-		                           AddGlobalInit);
+		                           AddGlobalInit, AddLocalInit);
 		add_function.in_out_function = AddFunction;
 		add_function.in_out_function_final = AddFinaliseFunction;
 		CreateTableFunctionInfo add_info(add_function);
