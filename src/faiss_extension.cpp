@@ -1,3 +1,4 @@
+#include "duckdb/common/helper.hpp"
 #include "duckdb/common/preserved_error.hpp"
 #include "duckdb/common/shared_ptr.hpp"
 #include "duckdb/common/types.hpp"
@@ -457,19 +458,23 @@ void ProcessSelectionvector(unique_ptr<DataChunk> &chunk, std::vector<uint8_t> &
 	uint8_t *dataBytes = data.GetData();
 	uint64_t *idBytes = (uint64_t *)ids.GetData();
 
+	uint64_t max = 0;
+
+	for (int i = 0; i < chunk->size(); i++) {
+		max = MaxValue(max, idBytes[i]);
+	}
+	if (output.size() <= max / 8) {
+		output.resize(max / 8 + 1);
+	}
+
 	// TODO: check if it is sequential for optimised simd
 	// TODO: use SIMD for this, as it will be very fast or (PEXT does 64 bits at a time, or 8 bools).
 	for (int i = 0; i < chunk->size(); i++) {
-		// in case of flatvector we can directly access this
 		uint64_t id = idBytes[i];
 		int arrIndex = id / 8;
 		int u8Index = id % 8;
-		if (output.size() <= arrIndex) {
-			output.resize(arrIndex + 1);
-		}
-		if (dataBytes[i]) {
-			output[arrIndex] = output[arrIndex] | (1 << u8Index);
-		}
+
+		output[arrIndex] = output[arrIndex] | (dataBytes[i] << u8Index);
 	}
 }
 
