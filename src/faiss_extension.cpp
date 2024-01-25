@@ -241,7 +241,10 @@ static OperatorResultType AddFunction(ExecutionContext &context, TableFunctionIn
 		                            "loaded from disk and don't need training.");
 	}
 
-	if (bind_data.has_labels && entry.add_data.size() != entry.add_labels.size()) {
+	entry.add_lock.get()->lock();
+	bool previous_with_labels = entry.add_data.size() != entry.add_labels.size() * entry.dimension;
+	entry.add_lock.get()->unlock();
+	if (bind_data.has_labels && previous_with_labels) {
 		throw InvalidInputException("Adding with labels, but index was previously added to without labels");
 	}
 
@@ -279,12 +282,12 @@ static OperatorResultType AddFunction(ExecutionContext &context, TableFunctionIn
 
 	entry.add_lock.get()->lock();
 	size_t original_data_size = entry.add_data.size();
-	entry.add_data.reserve(original_data_size + data_elements);
-	memcpy(&entry.add_data[original_data_size], child_ptr, data_elements * sizeof(float));
+	entry.add_data.resize(original_data_size + data_elements);
+	memcpy(&entry.add_data.data()[original_data_size], child_ptr, data_elements * sizeof(float));
 	if (bind_data.has_labels) {
 		size_t original_label_size = entry.add_labels.size();
-		entry.add_labels.reserve(original_label_size + vector_count);
-		memcpy(&entry.add_labels[original_label_size], label_ptr, input.size() * sizeof(long));
+		entry.add_labels.resize(original_label_size + vector_count);
+		memcpy(&entry.add_labels.data()[original_label_size], label_ptr, input.size() * sizeof(long));
 	}
 	entry.size += vector_count;
 	entry.add_lock.get()->unlock();
@@ -351,6 +354,123 @@ static OperatorFinalizeResultType AddFinaliseFunction(ExecutionContext &context,
 	}
 	entry.faiss_lock.get()->unlock();
 
+	return OperatorFinalizeResultType::FINISHED;
+}
+
+struct MTrainData : TableFunctionData {
+	string key;
+};
+
+static unique_ptr<FunctionData> MTrainBind(ClientContext &, TableFunctionBindInput &input,
+                                           vector<LogicalType> &return_types, vector<string> &names) {
+	auto bind_data = make_uniq<MTrainData>();
+
+	return_types.emplace_back(LogicalType::BOOLEAN);
+	names.emplace_back("Success");
+
+	bind_data->key = input.inputs[1].ToString();
+
+	return bind_data;
+}
+
+struct MTrainState : public GlobalTableFunctionState {
+	// This keeps track of how many threads are currently adding, this is to make sure that we
+	// only train/push to faiss when there are no threads adding more data. Does not guarantee
+	// that all data has been added, as some threads may just have not been started yet
+	std::atomic_uint64_t currently_adding;
+	unique_ptr<std::mutex> add_lock = unique_ptr<std::mutex>(new std::mutex());
+	// Store chunks for the add function (which can be done in parallel)
+	// to be added all at once at the end
+	vector<float> add_data;
+};
+
+static unique_ptr<GlobalTableFunctionState> MTrainGlobalInit(ClientContext &context, TableFunctionInitInput &input) {
+	return make_uniq<MTrainState>();
+}
+
+static unique_ptr<LocalTableFunctionState> MTrainLocalInit(ExecutionContext &context, TableFunctionInitInput &data_p,
+                                                           GlobalTableFunctionState *global_state) {
+	MTrainState &state = global_state->Cast<MTrainState>();
+	state.currently_adding++;
+	return make_uniq<LocalTableFunctionState>();
+}
+
+static OperatorResultType MTrainFunction(ExecutionContext &context, TableFunctionInput &data_p, DataChunk &input,
+                                         DataChunk &) {
+	MTrainState &state = data_p.global_state->Cast<MTrainState>();
+
+	auto bind_data = data_p.bind_data->Cast<MTrainData>();
+	auto &object_cache = ObjectCache::GetObjectCache(context.client);
+	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data.key);
+	if (!entry_ptr) {
+		throw InvalidInputException("Could not find index %s.", bind_data.key);
+	}
+	auto &entry = *entry_ptr;
+
+	if (!entry.isMutable) {
+		throw InvalidInputException(
+		    "Attempted to train to an immutable index. Indexes are marked immutable if they are "
+		    "loaded from disk and don't need training.");
+	}
+
+	auto data_elements = input.size() * entry.dimension;
+
+	auto child_vec = ListVectorToFaiss(context.client, input.data[0], input.size(), entry.dimension);
+	auto child_ptr = FlatVector::GetData<float>(*child_vec);
+
+	state.add_lock.get()->lock();
+	size_t original_data_size = state.add_data.size();
+	state.add_data.resize(original_data_size + data_elements);
+	memcpy(&state.add_data.data()[original_data_size], child_ptr, data_elements * sizeof(float));
+	state.add_lock.get()->unlock();
+
+	return OperatorResultType::NEED_MORE_INPUT;
+}
+
+static OperatorFinalizeResultType MTrainFinaliseFunction(ExecutionContext &context, TableFunctionInput &data_p,
+                                                         DataChunk &) {
+	MTrainState &state = data_p.global_state->Cast<MTrainState>();
+
+	auto bind_data = data_p.bind_data->Cast<MTrainData>();
+	auto &object_cache = ObjectCache::GetObjectCache(context.client);
+	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data.key);
+	if (!entry_ptr) {
+		throw InvalidInputException("Could not find index %s.", bind_data.key);
+	}
+
+	auto &entry = *entry_ptr;
+
+	state.add_lock.get()->lock();
+	state.currently_adding--;
+	if (state.currently_adding != 0) {
+		state.add_lock.get()->unlock();
+		return OperatorFinalizeResultType::FINISHED;
+	}
+	state.add_lock.get()->unlock();
+
+	if (state.add_data.size() == 0) {
+		return OperatorFinalizeResultType::FINISHED;
+	}
+
+	entry.faiss_lock.get()->lock();
+	try {
+		entry.index->train((faiss::idx_t)state.add_data.size() / entry.dimension, &state.add_data[0]);
+	} catch (faiss::FaissException exception) {
+		std::string msg = exception.msg;
+		if (msg.find("should be at least as large as number of clusters") != std::string::npos) {
+			throw InvalidInputException(
+			    "Index needs to be trained, but amount of datapoints is too small. Considere adding more data. (" +
+			        msg + ")",
+			    bind_data.key);
+		} else {
+			throw InvalidInputException("Error occured while training index: %s", msg);
+		}
+	}
+
+	entry.faiss_lock.get()->unlock();
+	// Future calls adding data to the index won't train the index anymore.
+	// They wil directly add to the index.
+	entry.needs_training = false;
 	return OperatorFinalizeResultType::FINISHED;
 }
 
@@ -602,6 +722,15 @@ static void LoadInternal(DatabaseInstance &instance) {
 		                          CreateFunction, CreateBind);
 		CreateTableFunctionInfo create_info(create_func);
 		catalog.CreateTableFunction(*con.context, &create_info);
+	}
+
+	{
+		TableFunction manual_train_function("faiss_manual_train", {LogicalType::TABLE, LogicalType::VARCHAR}, nullptr,
+		                                    MTrainBind, MTrainGlobalInit, MTrainLocalInit);
+		manual_train_function.in_out_function = MTrainFunction;
+		manual_train_function.in_out_function_final = MTrainFinaliseFunction;
+		CreateTableFunctionInfo manual_train_info(manual_train_function);
+		catalog.CreateTableFunction(*con.context, &manual_train_info);
 	}
 
 	{
