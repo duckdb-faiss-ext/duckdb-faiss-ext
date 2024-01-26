@@ -46,18 +46,24 @@ debug:
 
 release:
 	mkdir -p build/release && \
-	cmake $(GENERATOR) $(FORCE_COLOR) $(EXTENSION_FLAGS) ${CLIENT_FLAGS} -DEXTENSION_STATIC_BUILD=1 -DCMAKE_BUILD_TYPE=Release ${BUILD_FLAGS} -S ./duckdb/ -B build/release && \
+	cmake $(GENERATOR) $(FORCE_COLOR) $(EXTENSION_FLAGS) ${CLIENT_FLAGS} -DEXTENSION_STATIC_BUILD=1 -DCMAKE_BUILD_TYPE=RelWithDebInfo ${BUILD_FLAGS} -S ./duckdb/ -B build/release && \
 	cmake --build build/release --config RelWithDebInfo
 
 # Client build
 debug_js: CLIENT_FLAGS=-DBUILD_NODE=1 -DDUCKDB_EXTENSION_${EXTENSION_NAME}_SHOULD_LINK=0
 debug_js: debug
 
+debug_go: CLIENT_FLAGS=-DDUCKDB_EXTENSION_${EXTENSION_NAME}_SHOULD_LINK=0  -DDUCKDB_EXTENSION_${EXTENSION_NAME}_SHOULD_LINK="FALSE"
+debug_go: debug
+
 debug_python: CLIENT_FLAGS=-DBUILD_PYTHON=1 -DDUCKDB_EXTENSION_${EXTENSION_NAME}_SHOULD_LINK=0
 debug_python: debug
 
 release_js: CLIENT_FLAGS=-DBUILD_NODE=1 -DDUCKDB_EXTENSION_${EXTENSION_NAME}_SHOULD_LINK=0
 release_js: release
+
+release_go: CLIENT_FLAGS=-DDUCKDB_EXTENSION_${EXTENSION_NAME}_SHOULD_LINK=0  -DDUCKDB_EXTENSION_${EXTENSION_NAME}_SHOULD_LINK="FALSE"
+release_go: release
 
 release_python: CLIENT_FLAGS=-DBUILD_PYTHON=1 -DDUCKDB_EXTENSION_${EXTENSION_NAME}_SHOULD_LINK=0
 release_python: release
@@ -95,6 +101,12 @@ conformanceTests/index: create_msmarco_index
 
 run_msmarco_queries: conformanceTests/index
 	cd conformanceTests && python execute_queries.py
+
+bench_msmarco_queries: release_go
+	cp $(PROJ_DIR)/build/release/src/libduckdb_static.a $(PROJ_DIR)/go/deps/linux_amd64/libduckdb.a
+	cp $(PROJ_DIR)/build/release/third_party/**/*.a $(PROJ_DIR)/go/deps/linux_amd64
+	cp $(PROJ_DIR)/build/release/extension/**/*.a $(PROJ_DIR)/go/deps/linux_amd64
+	cd go && CGO_LDFLAGS="-L/home/jaap/Projects/thesis/faissExt/go/deps/linux_amd64 -lduckdb_utf8proc -lduckdb_pg_query -lduckdb_re2 -lduckdb_fmt -lduckdb_hyperloglog -lduckdb_fastpforlib -lduckdb_miniz -lduckdb_mbedtls -lduckdb_fsst -ljson_extension -licu_extension -lfts_extension -ljemalloc_extension -lparquet_extension -ltpcds_extension -ltpch_extension -lvisualizer_extension -lfaiss_extension -lomp -lblas -llapack -fsanitize=undefined" go test -benchmem -run="^$$" -bench=. -benchtime=30s -timeout=12h .
 
 install_local: install_release_local
 install_release_local: release
