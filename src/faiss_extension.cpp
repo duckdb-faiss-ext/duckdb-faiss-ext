@@ -54,6 +54,12 @@
 
 namespace duckdb {
 
+enum LABELSTATE {
+	UNDECIDED,
+	FALSE,
+	TRUE,
+};
+
 struct IndexEntry : ObjectCacheEntry {
 	unique_ptr<faiss::Index> index;
 
@@ -66,6 +72,8 @@ struct IndexEntry : ObjectCacheEntry {
 	// we assume that it is not possible to add any data, unless we know that it still
 	// needs training (and thus doesnt have any data yet).needs_training
 	bool isMutable = true;
+  
+	LABELSTATE custom_labels = UNDECIDED;
 
 	int dimension = 0; // This can easily be obtained from the index, doing only a pointer dereference.
 	vector<unique_ptr<float[]>> index_data; // Currently I do not see a use for this
@@ -190,21 +198,39 @@ static unique_ptr<Vector> ListVectorToFaiss(ClientContext &context, Vector &inpu
 
 struct AddData : TableFunctionData {
 	string key;
-	bool has_labels = false;
 };
 
-static unique_ptr<FunctionData> AddBind(ClientContext &, TableFunctionBindInput &input,
-                                        vector<LogicalType> &return_types, vector<string> &names) {
+static unique_ptr<FunctionData> AddBind(ClientContext &context, TableFunctionBindInput &input,
+                                        vector<LogicalType> &return_types, vector<string> &names) {	
 	auto bind_data = make_uniq<AddData>();
-
-	if (input.input_table_names.size() == 2) { // we have labels
-		bind_data->has_labels = true;
-	}
 
 	return_types.emplace_back(LogicalType::BOOLEAN);
 	names.emplace_back("Success");
 
 	bind_data->key = input.inputs[1].ToString();
+
+	auto &object_cache = ObjectCache::GetObjectCache(context);
+	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data->key);
+	if (!entry_ptr) {
+		throw InvalidInputException("Could not find index %s.", bind_data->key);
+	}
+	if (entry_ptr.get()->custom_labels == UNDECIDED) {
+		if (input.input_table_names.size() == 2) { // we have labels
+			entry_ptr.get()->custom_labels = TRUE;
+		} else {
+			entry_ptr.get()->custom_labels = FALSE;
+		}
+	} else {
+		if (input.input_table_names.size() == 2 && entry_ptr.get()->custom_labels == FALSE) {
+			throw InvalidInputException(
+			    "Tried to insert data with labels, when index was previously added without labels. "
+			    "Cannot mix data with and without labels");
+		} else if (input.input_table_names.size() == 1 && entry_ptr.get()->custom_labels == TRUE) {
+			throw InvalidInputException(
+			    "Tried to insert data without labels, when index was previously added with labels. "
+			    "Cannot mix data with and without labels");
+		}
+	}
 
 	return bind_data;
 }
@@ -241,33 +267,26 @@ static OperatorResultType AddFunction(ExecutionContext &context, TableFunctionIn
 		                            "loaded from disk and don't need training.");
 	}
 
-	entry.add_lock.get()->lock();
-	bool previous_with_labels = entry.add_data.size() != entry.add_labels.size() * entry.dimension;
-	entry.add_lock.get()->unlock();
-	if (bind_data.has_labels && previous_with_labels) {
-		throw InvalidInputException("Adding with labels, but index was previously added to without labels");
-	}
-
 	auto data_elements = input.size() * entry.dimension;
 	idx_t vector_count = input.size();
 
-	auto child_vec = ListVectorToFaiss(context.client, bind_data.has_labels ? input.data[1] : input.data[0],
+	auto child_vec = ListVectorToFaiss(context.client, entry.custom_labels == TRUE ? input.data[1] : input.data[0],
 	                                   input.size(), entry.dimension);
 	auto child_ptr = FlatVector::GetData<float>(*child_vec);
 
 	faiss::idx_t *label_ptr;
-	if (bind_data.has_labels) {
+	if (entry.custom_labels == TRUE) {
 		Vector label_cast_vec(LogicalType::BIGINT);
 		VectorOperations::Cast(context.client, input.data[0], label_cast_vec, input.size());
 		label_ptr = FlatVector::GetData<faiss::idx_t>(label_cast_vec);
 	}
 
-	// If we do not need training, no need to use do it all at the end!
+	// If we do not need to do any training, we can add all the data instantly!
 	if (!entry.needs_training) {
 		entry.faiss_lock.get()->lock();
 		// Yay error handling!
 		try {
-			if (bind_data.has_labels) {
+			if (entry.custom_labels == TRUE) {
 				entry.index->add_with_ids((faiss::idx_t)input.size(), child_ptr, label_ptr);
 			} else {
 				entry.index->add((faiss::idx_t)input.size(), child_ptr);
@@ -284,7 +303,7 @@ static OperatorResultType AddFunction(ExecutionContext &context, TableFunctionIn
 	size_t original_data_size = entry.add_data.size();
 	entry.add_data.resize(original_data_size + data_elements);
 	memcpy(&entry.add_data.data()[original_data_size], child_ptr, data_elements * sizeof(float));
-	if (bind_data.has_labels) {
+	if (entry.custom_labels == TRUE) {
 		size_t original_label_size = entry.add_labels.size();
 		entry.add_labels.resize(original_label_size + vector_count);
 		memcpy(&entry.add_labels.data()[original_label_size], label_ptr, input.size() * sizeof(long));
@@ -346,8 +365,7 @@ static OperatorFinalizeResultType AddFinaliseFunction(ExecutionContext &context,
 	faiss::idx_t new_element_count = total_elements - added_elements;
 	float *new_vector_data = &entry.add_data[added_elements * entry.dimension];
 	faiss::idx_t *new_label_data = &entry.add_labels[added_elements];
-
-	if (bind_data.has_labels) {
+	if (entry.custom_labels == TRUE) {
 		entry.index->add_with_ids(new_element_count, new_vector_data, new_label_data);
 	} else {
 		entry.index->add(new_element_count, new_vector_data);
@@ -634,6 +652,8 @@ void SearchFunctionFilter(DataChunk &input, ExpressionState &state, Vector &outp
 	searchIntoVector(state.GetContext(), entry, input.data[2], nQueries, nResults, searchParams.get(), output);
 }
 
+// IO functions
+
 struct SaveFunctionData : public TableFunctionData {
 	string key;
 	string filename;
@@ -725,15 +745,6 @@ static void LoadInternal(DatabaseInstance &instance) {
 	}
 
 	{
-		TableFunction manual_train_function("faiss_manual_train", {LogicalType::TABLE, LogicalType::VARCHAR}, nullptr,
-		                                    MTrainBind, MTrainGlobalInit, MTrainLocalInit);
-		manual_train_function.in_out_function = MTrainFunction;
-		manual_train_function.in_out_function_final = MTrainFinaliseFunction;
-		CreateTableFunctionInfo manual_train_info(manual_train_function);
-		catalog.CreateTableFunction(*con.context, &manual_train_info);
-	}
-
-	{
 		TableFunction add_function("faiss_add", {LogicalType::TABLE, LogicalType::VARCHAR}, nullptr, AddBind,
 		                           AddGlobalInit, AddLocalInit);
 		add_function.in_out_function = AddFunction;
@@ -776,6 +787,16 @@ static void LoadInternal(DatabaseInstance &instance) {
 		TableFunction create_func("faiss_destroy", {LogicalType::VARCHAR}, DestroyFunction, DestroyBind);
 		CreateTableFunctionInfo create_info(create_func);
 		catalog.CreateTableFunction(*con.context, &create_info);
+	}
+
+	// manual training
+	{
+		TableFunction manual_train_function("faiss_manual_train", {LogicalType::TABLE, LogicalType::VARCHAR}, nullptr,
+		                                    MTrainBind, MTrainGlobalInit, MTrainLocalInit);
+		manual_train_function.in_out_function = MTrainFunction;
+		manual_train_function.in_out_function_final = MTrainFinaliseFunction;
+		CreateTableFunctionInfo manual_train_info(manual_train_function);
+		catalog.CreateTableFunction(*con.context, &manual_train_info);
 	}
 
 	// IO functions
