@@ -72,7 +72,7 @@ struct IndexEntry : ObjectCacheEntry {
 	// we assume that it is not possible to add any data, unless we know that it still
 	// needs training (and thus doesnt have any data yet).needs_training
 	bool isMutable = true;
-  
+
 	LABELSTATE custom_labels = UNDECIDED;
 
 	int dimension = 0; // This can easily be obtained from the index, doing only a pointer dereference.
@@ -201,7 +201,7 @@ struct AddData : TableFunctionData {
 };
 
 static unique_ptr<FunctionData> AddBind(ClientContext &context, TableFunctionBindInput &input,
-                                        vector<LogicalType> &return_types, vector<string> &names) {	
+                                        vector<LogicalType> &return_types, vector<string> &names) {
 	auto bind_data = make_uniq<AddData>();
 
 	return_types.emplace_back(LogicalType::BOOLEAN);
@@ -568,41 +568,48 @@ void SearchFunction(DataChunk &input, ExpressionState &state, Vector &output) {
 void ProcessSelectionvector(unique_ptr<DataChunk> &chunk, std::vector<uint8_t> &output) {
 	Vector data = chunk->data[0];
 	Vector ids = chunk->data[1];
-	uint8_t *dataBytes = data.GetData();
-	uint64_t *idBytes = (uint64_t *)ids.GetData();
+	uint8_t *__restrict__ dataBytes = data.GetData();
+	uint64_t *__restrict__ idBytes = (uint64_t *)ids.GetData();
+	idx_t size = chunk->size();
+	if (size == 0) {
+		return;
+	}
 
 	uint64_t max = 0;
-
-	for (int i = 0; i < chunk->size(); i++) {
+	bool sequential = true;
+	uint64_t previous = idBytes[0] - 1;
+	for (int i = 0; i < size; i++) {
 		max = MaxValue(max, idBytes[i]);
+		sequential &= idBytes[i] == previous + 1;
+		previous = idBytes[i];
 	}
 	if (output.size() <= max / 8) {
 		output.resize(max / 8 + 1);
 	}
 
+	// TODO: remove requirements that the input should be alligned
+	if (!sequential || idBytes[0] % 8 != 0 || size % 8 != 0) {
+		for (int i = 0; i < size; i++) {
+			uint64_t id = idBytes[i];
+			int arrIndex = id / 8;
+			int u8Index = id % 8;
+
+			output[arrIndex] = output[arrIndex] | (dataBytes[i] << u8Index);
+		}
+	} else {
+		int i = 0;
+		int arrIndex = idBytes[0] / 8;
+		for (; i < size - 8;) {
+			output[arrIndex] = (dataBytes[i + 1] << 0) | (dataBytes[i + 2] << 1) | (dataBytes[i + 3] << 2) |
+			                   (dataBytes[i + 3] << 3) | (dataBytes[i + 4] << 4) | (dataBytes[i + 5] << 5) |
+			                   (dataBytes[i + 6] << 6) | (dataBytes[i + 7] << 7);
+			i += 8;
+			arrIndex += 1;
+		}
+	}
+
 	// TODO: check if it is sequential for optimised simd
 	// TODO: use SIMD for this, as it will be very fast or (PEXT does 64 bits at a time, or 8 bools).
-	// int i = 0;
-	// for (; i + 8 < chunk->size(); i += 8) {
-	// 	if (output.size() <= i / 8) {
-	// 		output.resize(i / 8 + 1);
-	// 	}
-	// 	for (int i2 = 0; i2 < 8; i2++) {
-	// 		uint64_t id = idBytes[i + i2];
-	// 		int arrIndex = id / 8;
-	// 		int u8Index = id % 8;
-	// 		if (dataBytes[i]) {
-	// 			output[arrIndex] = output[arrIndex] | (1 << u8Index);
-	// 		}
-	// 	}
-	// }
-	for (int i = 0; i < chunk->size(); i++) {
-		uint64_t id = idBytes[i];
-		int arrIndex = id / 8;
-		int u8Index = id % 8;
-
-		output[arrIndex] = output[arrIndex] | (dataBytes[i] << u8Index);
-	}
 }
 
 // TODO: search could be a table function, which would require more copying but
