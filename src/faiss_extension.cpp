@@ -1,56 +1,55 @@
+#include "faiss_extension.hpp"
+
+#include "duckdb.hpp"
+#include "duckdb/common/exception.hpp"
 #include "duckdb/common/helper.hpp"
+#include "duckdb/common/optional_ptr.hpp"
 #include "duckdb/common/preserved_error.hpp"
 #include "duckdb/common/shared_ptr.hpp"
+#include "duckdb/common/string_util.hpp"
 #include "duckdb/common/types.hpp"
+#include "duckdb/common/types/data_chunk.hpp"
 #include "duckdb/common/types/selection_vector.hpp"
 #include "duckdb/common/types/vector.hpp"
+#include "duckdb/common/unique_ptr.hpp"
 #include "duckdb/common/vector.hpp"
 #include "duckdb/execution/column_binding_resolver.hpp"
 #include "duckdb/execution/execution_context.hpp"
+#include "duckdb/execution/expression_executor.hpp"
+#include "duckdb/function/scalar_function.hpp"
+#include "duckdb/function/table_function.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/main/connection.hpp"
+#include "duckdb/main/database.hpp"
 #include "duckdb/main/prepared_statement.hpp"
 #include "duckdb/parallel/interrupt.hpp"
+#include "duckdb/parallel/thread_context.hpp"
+#include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
+#include "duckdb/parser/parsed_data/create_table_function_info.hpp"
+#include "duckdb/parser/parser.hpp"
+#include "duckdb/parser/query_node/select_node.hpp"
+#include "duckdb/planner/binder.hpp"
 #include "duckdb/planner/expression.hpp"
 #include "duckdb/planner/logical_operator.hpp"
+#include "duckdb/storage/object_cache.hpp"
 #include "faiss/Index.h"
 #include "faiss/IndexIDMap.h"
 #include "faiss/IndexIVF.h"
 #include "faiss/MetricType.h"
+#include "faiss/impl/FaissException.h"
 #include "faiss/impl/IDSelector.h"
+#include "faiss/index_factory.h"
+#include "faiss/index_io.h"
 
 #include <cstddef>
-#include <duckdb/common/optional_ptr.hpp>
-#include <duckdb/common/types/data_chunk.hpp>
-#include <duckdb/execution/expression_executor.hpp>
-#include <duckdb/main/database.hpp>
-#include <duckdb/parallel/thread_context.hpp>
-#include <duckdb/parser/query_node/select_node.hpp>
+#include <cstdint>
 #include <iostream>
 #include <ostream>
+#include <random>
+#include <shared_mutex>
 #include <string>
 #include <vector>
 #define DUCKDB_EXTENSION_MAIN
-
-#include "duckdb.hpp"
-#include "duckdb/common/exception.hpp"
-#include "duckdb/common/string_util.hpp"
-#include "duckdb/common/unique_ptr.hpp"
-#include "duckdb/function/scalar_function.hpp"
-#include "duckdb/function/table_function.hpp"
-#include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
-#include "duckdb/parser/parsed_data/create_table_function_info.hpp"
-#include "duckdb/parser/parser.hpp"
-#include "duckdb/planner/binder.hpp"
-#include "duckdb/storage/object_cache.hpp"
-#include "faiss_extension.hpp"
-
-#include <cstdint>
-#include <faiss/impl/FaissException.h>
-#include <faiss/index_factory.h>
-#include <faiss/index_io.h>
-#include <random>
-#include <shared_mutex>
 
 namespace duckdb {
 
