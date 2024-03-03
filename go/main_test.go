@@ -13,45 +13,6 @@ import (
 
 const targetPass = 0.99
 
-// func BenchmarkAllQueriesIVF2048_10_all(b *testing.B) {
-// 	b.StopTimer()
-// 	db, err := sql.Open("duckdb", "?allow_unsigned_extensions=true")
-// 	if err != nil {
-// 		panic(err)
-// 	}
-// 	loadFaiss(db)
-
-// 	_, err = db.Exec("CALL FAISS_LOAD('flat', '../conformanceTests/index_IVF2048')")
-// 	if err != nil {
-// 		b.Logf("failed loading faiss index: %v", err)
-// 		b.FailNow()
-// 	}
-
-// 	_, err = db.Exec("CREATE TABLE queries AS SELECT qid, vector AS embedding FROM '../conformanceTests/anserini-tools/topics-and-qrels/topics.dl19-passage.openai-ada2.jsonl.gz'")
-// 	if err != nil {
-// 		b.Logf("loading query vectors: %v", err)
-// 		b.FailNow()
-// 	}
-// 	b.StartTimer()
-// 	for n := 0; n < b.N; n++ {
-// 		rows, err := db.Query("SELECT qid, UNNEST(faiss_search('flat', 10, embedding)) FROM queries")
-// 		if err != nil {
-// 			b.Logf("executing query: %v", err)
-// 			b.FailNow()
-// 		}
-
-// 		var id int
-// 		var x map[string]interface{}
-// 		for rows.Next() {
-// 			rows.Scan(&id, &x)
-// 		}
-// 		if rows.Err() != nil {
-// 			b.Logf("Error while fetching rows: %v", rows.Err())
-// 			b.FailNow()
-// 		}
-// 	}
-// }
-
 func BenchmarkAllQueriesIVF2048_10(b *testing.B) {
 	const requiredResults = 10
 
@@ -59,7 +20,7 @@ func BenchmarkAllQueriesIVF2048_10(b *testing.B) {
 	if err != nil {
 		panic(err)
 	}
-	createSequentialTable(b, db, "ids", "id", 1000000)
+	createSeqModTable(b, db, "ids", "id", "sel", 8841823)
 	loadFaiss(db)
 
 	_, err = db.Exec("CALL FAISS_LOAD('flat', '../conformanceTests/index_IVF2048')")
@@ -130,36 +91,19 @@ func BenchmarkAllQueriesIVF2048_10(b *testing.B) {
 	}
 }
 
-// func BenchmarkModuloOperator(b *testing.B) {
-// 	db, err := sql.Open("duckdb", "?allow_unsigned_extensions=true")
-// 	if err != nil {
-// 		panic(err)
-// 	}
-// 	createSequentialTable(b, db, "ids", "id", 1000000)
-// 	for n := 0; n < b.N; n++ {
-// 		_, err := db.Exec("SELECT id//100 from ids")
-// 		if err != nil {
-// 			b.Log(err)
-// 			b.FailNow()
-// 		}
-// 	}
-// }
-
-func createSequentialTable(b *testing.B, db *sql.DB, tablename, columnname string, n int) {
-	_, err := db.Exec("CREATE TABLE " + tablename + " (" + columnname + " UINTEGER NOT NULL)")
+func createSeqModTable(b *testing.B, db *sql.DB, tablename, columnname, modname string, n int) {
+	// TODO: make this use unsigned integers, but duckdb doesnt allow range to work with unsigned integers.
+	_, err := db.Exec("CREATE TABLE " + tablename + " AS SELECT (i)::BIGINT AS " + columnname + ", (i%100)::BIGINT AS " + modname + " FROM range(0, " + strconv.Itoa(n) + ") tbl(i)")
 	if err != nil {
 		b.Logf("error creating prepared statement: %v", err)
 		b.FailNow()
 	}
+}
 
-	var command strings.Builder
-	command.WriteString("INSERT INTO " + tablename + " VALUES")
-	for i := 0; i < n; i++ {
-		command.WriteString("(" + strconv.Itoa(i) + "),")
-	}
-	_, err = db.Exec(command.String())
+func createSequentialTable(b *testing.B, db *sql.DB, tablename, columnname string, n int) {
+	_, err := db.Exec("CREATE TABLE " + tablename + " AS SELECT (i)::UINTEGER AS " + columnname + " FROM range(0, " + strconv.Itoa(n) + ") tbl(i)")
 	if err != nil {
-		b.Logf("error creating sequential table: %v", err)
+		b.Logf("error creating prepared statement: %v", err)
 		b.FailNow()
 	}
 }
