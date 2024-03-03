@@ -63,7 +63,7 @@ func main() {
 }
 
 func loadFaiss(db *sql.DB) {
-	_, err := db.Exec("LOAD '../build/release/extension/faiss/faiss.duckdb_extension';")
+	_, err := db.Exec("LOAD '../build/reldebug/extension/faiss/faiss.duckdb_extension';")
 	if err != nil {
 		panic(err)
 	}

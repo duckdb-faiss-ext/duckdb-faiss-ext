@@ -18,7 +18,7 @@ ifeq ($(GEN),ninja)
 	FORCE_COLOR=-DFORCE_COLORED_OUTPUT=1
 endif
 
-BUILD_FLAGS=-DEXTENSION_STATIC_BUILD=1 -DBUILD_TPCH_EXTENSION=1 -DBUILD_PARQUET_EXTENSION=1 ${OSX_BUILD_UNIVERSAL_FLAG} ${STATIC_LIBCPP}
+BUILD_FLAGS=-DBUILD_EXTENSIONS="json" -DEXTENSION_STATIC_BUILD=1 -DBUILD_TPCH_EXTENSION=0 -DBUILD_PARQUET_EXTENSION=0 ${OSX_BUILD_UNIVERSAL_FLAG} ${STATIC_LIBCPP}
 
 CLIENT_FLAGS :=
 
@@ -46,8 +46,13 @@ debug:
 
 release:
 	mkdir -p build/release && \
-	cmake $(GENERATOR) $(FORCE_COLOR) $(EXTENSION_FLAGS) ${CLIENT_FLAGS} -DEXTENSION_STATIC_BUILD=1 -DCMAKE_BUILD_TYPE=RelWithDebInfo ${BUILD_FLAGS} -S ./duckdb/ -B build/release && \
-	cmake --build build/release --config RelWithDebInfo
+	cmake $(GENERATOR) $(FORCE_COLOR) $(EXTENSION_FLAGS) ${CLIENT_FLAGS} -DEXTENSION_STATIC_BUILD=1 -DCMAKE_BUILD_TYPE=Release ${BUILD_FLAGS} -S ./duckdb/ -B build/release && \
+	cmake --build build/release --config Release
+
+reldebug:
+	mkdir -p build/reldebug && \
+	cmake $(GENERATOR) $(FORCE_COLOR) $(EXTENSION_FLAGS) ${CLIENT_FLAGS} -DEXTENSION_STATIC_BUILD=1 -DCMAKE_BUILD_TYPE=RelWithDebInfo ${BUILD_FLAGS} -S ./duckdb/ -B build/reldebug && \
+	cmake --build build/reldebug --config RelWithDebInfo
 
 # Client build
 debug_js: CLIENT_FLAGS=-DBUILD_NODE=1 -DDUCKDB_EXTENSION_${EXTENSION_NAME}_SHOULD_LINK=0
@@ -64,6 +69,9 @@ release_js: release
 
 release_go: CLIENT_FLAGS=-DDUCKDB_EXTENSION_${EXTENSION_NAME}_SHOULD_LINK=0  -DDUCKDB_EXTENSION_${EXTENSION_NAME}_SHOULD_LINK="FALSE"
 release_go: release
+
+reldebug_go: CLIENT_FLAGS=-DDUCKDB_EXTENSION_${EXTENSION_NAME}_SHOULD_LINK=0  -DDUCKDB_EXTENSION_${EXTENSION_NAME}_SHOULD_LINK="FALSE"
+reldebug_go: reldebug
 
 release_python: CLIENT_FLAGS=-DBUILD_PYTHON=1 -DDUCKDB_EXTENSION_${EXTENSION_NAME}_SHOULD_LINK=0
 release_python: release
@@ -102,11 +110,11 @@ conformanceTests/index: create_msmarco_index
 run_msmarco_queries: conformanceTests/index
 	cd conformanceTests && python execute_queries.py
 
-bench_msmarco_queries: release_go
-	cp $(PROJ_DIR)/build/release/src/libduckdb_static.a $(PROJ_DIR)/go/deps/linux_amd64/libduckdb.a
-	cp $(PROJ_DIR)/build/release/third_party/**/*.a $(PROJ_DIR)/go/deps/linux_amd64
-	cp $(PROJ_DIR)/build/release/extension/**/*.a $(PROJ_DIR)/go/deps/linux_amd64
-	cd go && CGO_LDFLAGS="-L/home/jaap/Projects/thesis/faissExt/go/deps/linux_amd64 -lduckdb_utf8proc -lduckdb_pg_query -lduckdb_re2 -lduckdb_fmt -lduckdb_hyperloglog -lduckdb_fastpforlib -lduckdb_miniz -lduckdb_mbedtls -lduckdb_fsst -ljson_extension -licu_extension -lfts_extension -ljemalloc_extension -lparquet_extension -ltpcds_extension -ltpch_extension -lvisualizer_extension -lfaiss_extension -lomp -lblas -llapack -fsanitize=undefined" go test -benchmem -run="^$$" -bench=. -benchtime=30s -timeout=12h .
+bench_msmarco_queries: reldebug_go
+	cp $(PROJ_DIR)/build/reldebug/src/libduckdb_static.a $(PROJ_DIR)/go/deps/linux_amd64/libduckdb.a
+	cp $(PROJ_DIR)/build/reldebug/third_party/**/*.a $(PROJ_DIR)/go/deps/linux_amd64
+	cp $(PROJ_DIR)/build/reldebug/extension/**/*.a $(PROJ_DIR)/go/deps/linux_amd64
+	cd go && CGO_LDFLAGS="-L$(PROJ_DIR)/go/deps/linux_amd64 -lduckdb -lduckdb_utf8proc -lduckdb_pg_query -lduckdb_re2 -lduckdb_fmt -lduckdb_hyperloglog -lduckdb_fastpforlib -lduckdb_miniz -lduckdb_mbedtls -lduckdb_fsst -ljson_extension -licu_extension -lfts_extension -ljemalloc_extension -lparquet_extension -ltpcds_extension -ltpch_extension -lvisualizer_extension -lfaiss_extension -lomp -lblas -llapack -fsanitize=undefined" go test -benchmem -run="^$$" -bench=. -benchtime=30s -timeout=12h .
 
 install_local: install_release_local
 install_release_local: release
