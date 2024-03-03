@@ -607,13 +607,8 @@ void ProcessSelectionvector(unique_ptr<DataChunk> &chunk, std::vector<uint8_t> &
 			arrIndex += 1;
 		}
 	}
-
-	// TODO: check if it is sequential for optimised simd
-	// TODO: use SIMD for this, as it will be very fast or (PEXT does 64 bits at a time, or 8 bools).
 }
 
-// TODO: search could be a table function, which would require more copying but
-// could result in allowing duckdb to "ask for more" if needed
 void SearchFunctionFilter(DataChunk &input, ExpressionState &state, Vector &output) {
 	auto &object_cache = ObjectCache::GetObjectCache(state.GetContext());
 	auto key = input.data[0].GetValue(0).ToString();
@@ -624,12 +619,12 @@ void SearchFunctionFilter(DataChunk &input, ExpressionState &state, Vector &outp
 	}
 	auto &entry = *entry_ptr;
 
-	// Once possible use prepared statements, currently not possible to use variables for tables (SELECT * FROM $1
-	// doesnt parse) use std::format in c++20, this is really ugly
+	// Once possible use prepared statements, currently not possible to use variables for tables (SELECT *
+	// FROM $1 doesnt parse) use std::format in c++20, this is really ugly
 	std::stringstream ss;
 	// Unlike the normal nomenclature, (u)int1 means int of 1 byte, and (u)int8 means 8 bytes.
-	ss << "SELECT CAST(" << input.data[3].GetValue(0).GetValue<string>() << " AS INT1), CAST("
-	   << input.data[4].GetValue(0).GetValue<string>() << " AS INT8) from "
+	ss << "SELECT CAST(" << input.data[3].GetValue(0).GetValue<string>() << " AS UTINYINT), CAST("
+	   << input.data[4].GetValue(0).GetValue<string>() << " AS BIGINT) from "
 	   << input.data[5].GetValue(0).GetValue<string>();
 
 	string filterExpression = ss.str();
@@ -650,6 +645,61 @@ void SearchFunctionFilter(DataChunk &input, ExpressionState &state, Vector &outp
 
 	// create selector
 	faiss::IDSelectorBitmap selector = faiss::IDSelectorBitmap(mask.size(), mask.data());
+	unique_ptr<faiss::SearchParameters> searchParams = createSearchParameters(entry.index.get(), &selector);
+
+	// === normal search ===
+	size_t nQueries = input.size();
+	size_t nResults = input.data[1].GetValue(0).GetValue<int32_t>();
+
+	searchIntoVector(state.GetContext(), entry, input.data[2], nQueries, nResults, searchParams.get(), output);
+}
+
+// TODO: ensure that the input vectors are ordered in the query itself??
+void ProcessIncludeSet(unique_ptr<DataChunk> &chunk, std::vector<faiss::idx_t> &output) {
+	Vector ids = chunk->data[0];
+	uint64_t *__restrict__ idBytes = (uint64_t *)ids.GetData();
+
+	idx_t target = output.size();
+	output.resize(output.size() + chunk->size());
+	memcpy(&output[target], idBytes, chunk->size() * sizeof(faiss::idx_t));
+}
+
+void SearchFunctionFilterSet(DataChunk &input, ExpressionState &state, Vector &output) {
+	auto &object_cache = ObjectCache::GetObjectCache(state.GetContext());
+	auto key = input.data[0].GetValue(0).ToString();
+
+	auto entry_ptr = object_cache.Get<IndexEntry>(key);
+	if (!entry_ptr) {
+		throw InvalidInputException("Could not find index %s.", key);
+	}
+	auto &entry = *entry_ptr;
+
+	// Once possible use prepared statements, currently not possible to use variables for tables (SELECT *
+	// FROM $1 doesnt parse) use std::format in c++20, this is really ugly
+	std::stringstream ss;
+	// Unlike the normal nomenclature, (u)int1 means int of 1 byte, and (u)int8 means 8 bytes.
+	ss << "SELECT CAST(" << input.data[4].GetValue(0).GetValue<string>() << " AS BIGINT) from "
+	   << input.data[5].GetValue(0).GetValue<string>() << " WHERE " << input.data[3].GetValue(0).GetValue<string>();
+
+	string filterExpression = ss.str();
+
+	shared_ptr<DatabaseInstance> db = state.GetContext().db;
+	shared_ptr<ClientContext> subcommection = make_shared<ClientContext>(db);
+	unique_ptr<QueryResult> result = subcommection->Query(filterExpression, true);
+
+	if (result->HasError()) {
+		throw InvalidInputException("uable to execute filter query: %s", result->GetError());
+	}
+	vector<faiss::idx_t> mask = vector<faiss::idx_t>();
+	unique_ptr<DataChunk> chunk = unique_ptr<DataChunk>();
+	PreservedError error;
+	while (result->TryFetch(chunk, error) && chunk) {
+		ProcessIncludeSet(chunk, mask);
+		// ProcessSelectionvector(chunk, mask);
+	}
+
+	// create selector
+	faiss::IDSelectorBatch selector = faiss::IDSelectorBatch(mask.size(), mask.data());
 	unique_ptr<faiss::SearchParameters> searchParams = createSearchParameters(entry.index.get(), &selector);
 
 	// === normal search ===
@@ -786,6 +836,22 @@ static void LoadInternal(DatabaseInstance &instance) {
 		                                       LogicalType::LIST(LogicalType::ANY), LogicalType::VARCHAR,
 		                                       LogicalType::VARCHAR, LogicalType::VARCHAR},
 		                                      return_type, SearchFunctionFilter);
+		CreateScalarFunctionInfo search_info(search_function_filter);
+		catalog.CreateFunction(*con.context, search_info);
+	}
+
+	{
+		child_list_t<LogicalType> struct_children;
+		struct_children.emplace_back("rank", LogicalType::INTEGER);
+		struct_children.emplace_back("label", LogicalType::BIGINT);
+		struct_children.emplace_back("distance", LogicalType::FLOAT);
+		auto return_type = LogicalType::LIST(LogicalType::STRUCT(std::move(struct_children)));
+
+		ScalarFunction search_function_filter("faiss_search_filter_set",
+		                                      {LogicalType::VARCHAR, LogicalType::INTEGER,
+		                                       LogicalType::LIST(LogicalType::ANY), LogicalType::VARCHAR,
+		                                       LogicalType::VARCHAR, LogicalType::VARCHAR},
+		                                      return_type, SearchFunctionFilterSet);
 		CreateScalarFunctionInfo search_info(search_function_filter);
 		catalog.CreateFunction(*con.context, search_info);
 	}
