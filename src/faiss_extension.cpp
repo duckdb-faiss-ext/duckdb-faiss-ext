@@ -600,7 +600,7 @@ void ProcessSelectionvector(unique_ptr<DataChunk> &chunk, std::vector<uint8_t> &
 		int i = 0;
 		int arrIndex = idBytes[0] / 8;
 		for (; i < size - 8;) {
-			output[arrIndex] = (dataBytes[i + 1] << 0) | (dataBytes[i + 2] << 1) | (dataBytes[i + 3] << 2) |
+			output[arrIndex] = (dataBytes[i + 0] << 0) | (dataBytes[i + 1] << 1) | (dataBytes[i + 2] << 2) |
 			                   (dataBytes[i + 3] << 3) | (dataBytes[i + 4] << 4) | (dataBytes[i + 5] << 5) |
 			                   (dataBytes[i + 6] << 6) | (dataBytes[i + 7] << 7);
 			i += 8;
