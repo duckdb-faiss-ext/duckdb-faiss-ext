@@ -1,14 +1,13 @@
 package main
 
 import (
-	"database/sql"
 	"fmt"
 	"math"
-	"strconv"
-	"strings"
+	"runtime"
 	"testing"
 
 	_ "github.com/ianlancetaylor/cgosymbolizer"
+	"gonum.org/v1/gonum/stat/distuv"
 )
 
 const targetPass = 0.99
@@ -16,95 +15,33 @@ const targetPass = 0.99
 func BenchmarkAllQueriesIVF2048_10(b *testing.B) {
 	const requiredResults = 10
 
-	db, err := sql.Open("duckdb", "?allow_unsigned_extensions=true")
-	if err != nil {
-		panic(err)
-	}
-	createSeqModTable(b, db, "ids", "id", "sel", 8841823)
-	loadFaiss(db)
+	benchinit()
 
-	_, err = db.Exec("CALL FAISS_LOAD('flat', '../conformanceTests/index_IVF2048')")
-	if err != nil {
-		b.Logf("failed loading faiss index: %v", err)
-		b.FailNow()
-	}
-
-	_, err = db.Exec("CREATE TABLE queries AS SELECT qid, vector AS embedding FROM '../conformanceTests/anserini-tools/topics-and-qrels/topics.dl19-passage.openai-ada2.jsonl.gz'")
-	if err != nil {
-		b.Logf("loading query vectors: %v", err)
-		b.FailNow()
-	}
 	for p := 1; p < 100; p++ {
 		p := p
-		// binom := distuv.Binomial{
-		// 	P: float64(p) / 100,
-		// }
-		// // requiredN, _ := bisectRootN(func(x float64) float64 {
-		// 	binom.N = x
-		// 	return binom.CDF(requiredResults) - targetPass
-		// }, 0, 100000)
+		binom := distuv.Binomial{
+			P: float64(p) / 100,
+		}
+		requiredN, _ := bisectRootN(func(x float64) float64 {
+			binom.N = x
+			return (1 - binom.CDF(requiredResults)) - targetPass
+		}, 0, 100000)
 
-		// b.Run(fmt.Sprintf("%02d%%_nonfilter", p), func(b *testing.B) {
-		// 	for n := 0; n < b.N; n++ {
-		// 		// This query has been verified to actuall return values with correct label
-		// 		query := fmt.Sprintf("SELECT qid, UNNEST(faiss_search('flat', %d, embedding)) FROM queries", requiredN)
-		// 		rows, err := db.Query(query)
-		// 		if err != nil {
-		// 			b.Logf("executing query: %v", err)
-		// 			b.Logf("related query:%v", query)
-		// 			b.FailNow()
-		// 		}
-
-		// 		var id int
-		// 		var x map[string]interface{}
-		// 		for rows.Next() {
-		// 			rows.Scan(&id, &x)
-		// 		}
-		// 		if rows.Err() != nil {
-		// 			b.Logf("Error while fetching rows: %v", rows.Err())
-		// 			b.FailNow()
-		// 		}
-		// 	}
-		// })
-		b.Run(fmt.Sprintf("%02d%%_filter", p), func(b *testing.B) {
-			for n := 0; n < b.N; n++ {
-				// This query has been verified to actuall return values with correct label
-				query := fmt.Sprintf("SELECT qid, UNNEST(faiss_search_filter('flat', %d, embedding, 'id%%100<%d', 'id', 'ids')) FROM queries", requiredResults, p)
-				rows, err := db.Query(query)
-				if err != nil {
-					b.Logf("executing query: %v", err)
-					b.Logf("related query:%v", query)
-					b.FailNow()
-				}
-
-				var id int
-				var x map[string]interface{}
-				if rows.Err() != nil {
-					b.Logf("Error while fetching rows: %v", rows.Err())
-					b.FailNow()
-				}
-				for rows.Next() {
-					rows.Scan(&id, &x)
-				}
-			}
+		b.Run(fmt.Sprintf("%02d%%_nonfilter", 1), func(b *testing.B) {
+			runtime.LockOSThread()
+			benchrun_non(uint64(b.N), uint32(requiredN))
+			runtime.UnlockOSThread()
 		})
-	}
-}
-
-func createSeqModTable(b *testing.B, db *sql.DB, tablename, columnname, modname string, n int) {
-	// TODO: make this use unsigned integers, but duckdb doesnt allow range to work with unsigned integers.
-	_, err := db.Exec("CREATE TABLE " + tablename + " AS SELECT (i)::BIGINT AS " + columnname + ", (i%100)::BIGINT AS " + modname + " FROM range(0, " + strconv.Itoa(n) + ") tbl(i)")
-	if err != nil {
-		b.Logf("error creating prepared statement: %v", err)
-		b.FailNow()
-	}
-}
-
-func createSequentialTable(b *testing.B, db *sql.DB, tablename, columnname string, n int) {
-	_, err := db.Exec("CREATE TABLE " + tablename + " AS SELECT (i)::UINTEGER AS " + columnname + " FROM range(0, " + strconv.Itoa(n) + ") tbl(i)")
-	if err != nil {
-		b.Logf("error creating prepared statement: %v", err)
-		b.FailNow()
+		b.Run(fmt.Sprintf("%02d%%_filtersel", 1), func(b *testing.B) {
+			runtime.LockOSThread()
+			benchrun_sel(uint64(b.N), uint32(p))
+			runtime.UnlockOSThread()
+		})
+		b.Run(fmt.Sprintf("%02d%%_filterset", 1), func(b *testing.B) {
+			runtime.LockOSThread()
+			benchrun_set(uint64(b.N), uint32(p))
+			runtime.UnlockOSThread()
+		})
 	}
 }
 
