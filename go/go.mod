@@ -1,6 +1,6 @@
 module faissextcode
 
-go 1.21.5
+go 1.18
 
 require (
 	github.com/ianlancetaylor/cgosymbolizer v0.0.0-20231130194700-cfcb2fd150eb // indirect

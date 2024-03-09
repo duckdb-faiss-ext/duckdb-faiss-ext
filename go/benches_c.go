@@ -56,6 +56,11 @@ void run_non(uint64_t N, uint32_t n) {
 		if (state == DuckDBError) {
 			printf("unable to execute queries");
 		}
+		int resultn = duckdb_result_chunk_count(result);
+		for (int i = 0; i < resultn; i++){
+			duckdb_data_chunk chunk = duckdb_result_get_chunk(result, i);
+			duckdb_destroy_data_chunk(&chunk);
+		}
 	}
 }
 
@@ -69,6 +74,11 @@ void run_sel(uint64_t N, uint32_t p) {
 		if (state == DuckDBError) {
 			printf("unable to execute queries");
 		}
+		int resultn = duckdb_result_chunk_count(result);
+		for (int i = 0; i < resultn; i++){
+			duckdb_data_chunk chunk = duckdb_result_get_chunk(result, i);
+			duckdb_destroy_data_chunk(&chunk);
+		}
 	}
 }
 
@@ -81,6 +91,11 @@ void run_set(uint64_t N, uint32_t p) {
 		state = duckdb_query(con, query, &result);
 		if (state == DuckDBError) {
 			printf("unable to execute queries");
+		}
+		int resultn = duckdb_result_chunk_count(result);
+		for (int i = 0; i < resultn; i++){
+			duckdb_data_chunk chunk = duckdb_result_get_chunk(result, i);
+			duckdb_destroy_data_chunk(&chunk);
 		}
 	}
 }

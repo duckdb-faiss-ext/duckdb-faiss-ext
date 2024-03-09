@@ -3,7 +3,7 @@ import time
 import os
 
 clusters = 65536 // 32 # 65536 is the original, just divide to give a better solution
-matching_pattern = "?"
+matching_pattern = "*"
 vector_length = 1536
 
 EXT_PATH = os.getenv('FAISS_EXTENSION_BINARY_PATH')
@@ -20,4 +20,4 @@ con.sql("CALL FAISS_MANUAL_TRAIN((SELECT emb FROM input1), 'flat')") # doing the
 print("adding vectors")
 con.sql("CALL FAISS_ADD((SELECT docid, emb FROM input1), 'flat')")
 print("saving index")
-con.sql(f"CALL FAISS_SAVE('flat', 'index_2IVF{clusters}_{matching_pattern}')")
+con.sql(f"CALL FAISS_SAVE('flat', '/scratch/jaarts/index_IVF{clusters}_{matching_pattern}')")
