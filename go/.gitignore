@@ -1,4 +1,4 @@
 faissextcode.test
-create_index
-create_trec
+./create_index
+./create_trec
 deps
