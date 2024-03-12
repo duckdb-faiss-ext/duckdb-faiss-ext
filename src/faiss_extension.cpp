@@ -33,6 +33,7 @@
 #include "duckdb/planner/logical_operator.hpp"
 #include "duckdb/storage/object_cache.hpp"
 #include "faiss/Index.h"
+#include "faiss/IndexHNSW.h"
 #include "faiss/IndexIDMap.h"
 #include "faiss/IndexIVF.h"
 #include "faiss/MetricType.h"
@@ -538,10 +539,18 @@ unique_ptr<faiss::SearchParameters> createSearchParameters(faiss::Index *index, 
 	if (ivf) {
 		unique_ptr<faiss::SearchParametersIVF> searchParams = make_uniq<faiss::SearchParametersIVF>();
 		searchParams->sel = selector;
+		searchParams->nprobe = 10;
 		return searchParams;
 	}
 
-	unique_ptr<faiss::SearchParameters> searchParams = unique_ptr<faiss::SearchParameters>();
+	void *hnsw = dynamic_cast<faiss::IndexHNSW *>(index);
+	if (hnsw) {
+		unique_ptr<faiss::SearchParametersHNSW> searchParams = make_uniq<faiss::SearchParametersHNSW>();
+		searchParams->sel = selector;
+		return searchParams;
+	}
+
+	unique_ptr<faiss::SearchParameters> searchParams = make_uniq<faiss::SearchParameters>();
 	searchParams->sel = selector;
 	return searchParams;
 }
