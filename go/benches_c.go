@@ -1,4 +1,4 @@
-package main
+package faissextcode
 
 /*
 #include <duckdb.h>
@@ -30,17 +30,17 @@ void init() {
 		printf("unable to create mod table");
 	}
 
-	state = duckdb_query(con, "LOAD '../build/reldebug/extension/faiss/faiss.duckdb_extension';", NULL);
+	state = duckdb_query(con, "LOAD 'build/reldebug/extension/faiss/faiss.duckdb_extension';", NULL);
 	if (state == DuckDBError) {
 		printf("unable to create mod table");
 	}
 
-	state = duckdb_query(con, "CALL FAISS_LOAD('flat', '../conformanceTests/index_IVF2048');", NULL);
+	state = duckdb_query(con, "CALL FAISS_LOAD('flat', 'conformanceTests/index_IVF2048');", NULL);
 	if (state == DuckDBError) {
 		printf("unable to load faiss index");
 	}
 
-	state = duckdb_query(con, "CREATE TABLE queries AS SELECT qid, vector AS embedding FROM '../conformanceTests/anserini-tools/topics-and-qrels/topics.dl19-passage.openai-ada2.jsonl.gz'", NULL);
+	state = duckdb_query(con, "CREATE TABLE queries AS SELECT qid, vector AS embedding FROM 'conformanceTests/anserini-tools/topics-and-qrels/topics.dl19-passage.openai-ada2.jsonl.gz'", NULL);
 	if (state == DuckDBError) {
 		printf("unable to create queries table");
 	}
