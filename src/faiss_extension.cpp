@@ -44,6 +44,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <duckdb/common/enum_util.hpp>
 #include <iostream>
 #include <ostream>
 #include <random>
@@ -530,16 +531,29 @@ void searchIntoVector(ClientContext &ctx, IndexEntry &entry, Vector inputdata, s
 	}
 }
 
-unique_ptr<faiss::SearchParameters> createSearchParameters(faiss::Index *index, faiss::IDSelector *selector) {
+string getUserParamValue(Vector &userParams, uint64_t paramCount, string key) {
+	Vector &keys = MapVector::GetKeys(userParams);
+	Vector &values = MapVector::GetValues(userParams);
+	for (uint64_t i = 0; i < paramCount; i++) {
+		if (keys.GetValue(i).GetValue<string>() == key) {
+			return values.GetValue(i).GetValue<string>();
+		}
+	}
+	return "";
+}
+
+unique_ptr<faiss::SearchParameters> createSearchParameters(faiss::Index *index, faiss::IDSelector *selector,
+                                                           Vector *userParams, uint64_t paramCount) {
 	faiss::IndexIDMap *idmap = dynamic_cast<faiss::IndexIDMap *>(index);
 	if (idmap) {
-		return createSearchParameters(idmap->index, selector);
+		return createSearchParameters(idmap->index, selector, userParams, paramCount);
 	}
 	void *ivf = dynamic_cast<faiss::IndexIVF *>(index);
 	if (ivf) {
 		unique_ptr<faiss::SearchParametersIVF> searchParams = make_uniq<faiss::SearchParametersIVF>();
 		searchParams->sel = selector;
-		searchParams->nprobe = 10;
+		// stoi can throw, we should catch and rethrow invalid input exception.
+		searchParams->nprobe = std::stoi(getUserParamValue(*userParams, paramCount, "nprobe"));
 		return searchParams;
 	}
 
@@ -567,7 +581,16 @@ void SearchFunction(DataChunk &input, ExpressionState &state, Vector &output) {
 	}
 	size_t nQueries = input.size();
 	size_t nResults = input.data[1].GetValue(0).GetValue<int32_t>();
-	unique_ptr<faiss::SearchParameters> searchParams = createSearchParameters(entry_ptr->index.get(), NULL);
+
+	Vector *userParams = nullptr;
+	uint64_t paramCount = 0;
+	if (input.data.size() == 4) {
+		userParams = &input.data[3];
+		paramCount = input.size();
+	}
+
+	unique_ptr<faiss::SearchParameters> searchParams =
+	    createSearchParameters(entry_ptr->index.get(), NULL, userParams, paramCount);
 
 	searchIntoVector(state.GetContext(), *entry_ptr, input.data[2], nQueries, nResults, searchParams.get(), output);
 }
@@ -653,7 +676,7 @@ void SearchFunctionFilter(DataChunk &input, ExpressionState &state, Vector &outp
 
 	// create selector
 	faiss::IDSelectorBitmap selector = faiss::IDSelectorBitmap(mask.size(), mask.data());
-	unique_ptr<faiss::SearchParameters> searchParams = createSearchParameters(entry.index.get(), &selector);
+	unique_ptr<faiss::SearchParameters> searchParams = createSearchParameters(entry.index.get(), &selector, NULL, 0);
 
 	// === normal search ===
 	size_t nQueries = input.size();
@@ -708,7 +731,7 @@ void SearchFunctionFilterSet(DataChunk &input, ExpressionState &state, Vector &o
 
 	// create selector
 	faiss::IDSelectorBatch selector = faiss::IDSelectorBatch(mask.size(), mask.data());
-	unique_ptr<faiss::SearchParameters> searchParams = createSearchParameters(entry.index.get(), &selector);
+	unique_ptr<faiss::SearchParameters> searchParams = createSearchParameters(entry.index.get(), &selector, NULL, 0);
 
 	// === normal search ===
 	size_t nQueries = input.size();
@@ -830,6 +853,14 @@ static void LoadInternal(DatabaseInstance &instance) {
 		    return_type, SearchFunction);
 		CreateScalarFunctionInfo search_info(search_function);
 		catalog.CreateFunction(*con.context, search_info);
+
+		ScalarFunction search_function2("faiss_search2",
+		                                {LogicalType::VARCHAR, LogicalType::INTEGER,
+		                                 LogicalType::LIST(LogicalType::ANY),
+		                                 LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR)},
+		                                return_type, SearchFunction);
+		CreateScalarFunctionInfo search_info2(search_function2);
+		catalog.CreateFunction(*con.context, search_info2);
 	}
 
 	{
