@@ -123,6 +123,40 @@ static unique_ptr<FunctionData> CreateBind(ClientContext &, TableFunctionBindInp
 	return std::move(result);
 }
 
+string getUserParamValue(Vector &userParams, uint64_t paramCount, string key) {
+	if (paramCount == 0) {
+		return "";
+	}
+	Vector &keys = MapVector::GetKeys(userParams);
+	Vector &values = MapVector::GetValues(userParams);
+	for (uint64_t i = 0; i < paramCount; i++) {
+		if (keys.GetValue(i).GetValue<string>() == key) {
+			return values.GetValue(i).GetValue<string>();
+		}
+	}
+	return "";
+}
+
+
+faiss::Index *setIndexParameters(faiss::Index *index, Vector *userParams, uint64_t paramCount) {
+	faiss::IndexIDMap *idmap = dynamic_cast<faiss::IndexIDMap *>(index);
+	if (idmap) {
+		return setIndexParameters(idmap->index, userParams, paramCount);
+	}
+
+	faiss::IndexHNSW *hnsw = dynamic_cast<faiss::IndexHNSW *>(index);
+	if (hnsw) {
+		unique_ptr<faiss::SearchParametersHNSW> searchParams = make_uniq<faiss::SearchParametersHNSW>();
+		string efconstruction = getUserParamValue(*userParams, paramCount, "efConstruction");
+		if (efconstruction != "") {
+			hnsw->hnsw.efConstruction = std::stoi(efconstruction);
+		}
+		return hnsw;
+	}
+
+	return index;
+}
+
 static void CreateFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &) {
 	auto &bind_data = data_p.bind_data->Cast<CreateFunctionData>();
 	auto &object_cache = ObjectCache::GetObjectCache(context);
@@ -531,17 +565,6 @@ void searchIntoVector(ClientContext &ctx, IndexEntry &entry, Vector inputdata, s
 	}
 }
 
-string getUserParamValue(Vector &userParams, uint64_t paramCount, string key) {
-	Vector &keys = MapVector::GetKeys(userParams);
-	Vector &values = MapVector::GetValues(userParams);
-	for (uint64_t i = 0; i < paramCount; i++) {
-		if (keys.GetValue(i).GetValue<string>() == key) {
-			return values.GetValue(i).GetValue<string>();
-		}
-	}
-	return "";
-}
-
 unique_ptr<faiss::SearchParameters> createSearchParameters(faiss::Index *index, faiss::IDSelector *selector,
                                                            Vector *userParams, uint64_t paramCount) {
 	faiss::IndexIDMap *idmap = dynamic_cast<faiss::IndexIDMap *>(index);
@@ -553,7 +576,10 @@ unique_ptr<faiss::SearchParameters> createSearchParameters(faiss::Index *index, 
 		unique_ptr<faiss::SearchParametersIVF> searchParams = make_uniq<faiss::SearchParametersIVF>();
 		searchParams->sel = selector;
 		// stoi can throw, we should catch and rethrow invalid input exception.
-		searchParams->nprobe = std::stoi(getUserParamValue(*userParams, paramCount, "nprobe"));
+		string nprobe = getUserParamValue(*userParams, paramCount, "nprobe");
+		if (nprobe != "") {
+			searchParams->nprobe = std::stoi(nprobe);
+		}
 		return searchParams;
 	}
 
@@ -561,6 +587,11 @@ unique_ptr<faiss::SearchParameters> createSearchParameters(faiss::Index *index, 
 	if (hnsw) {
 		unique_ptr<faiss::SearchParametersHNSW> searchParams = make_uniq<faiss::SearchParametersHNSW>();
 		searchParams->sel = selector;
+		// stoi can throw, we should catch and rethrow invalid input exception.
+		string efSearch = getUserParamValue(*userParams, paramCount, "efSearch");
+		if (efSearch != "") {
+			searchParams->efSearch = std::stoi(efSearch);
+		}
 		return searchParams;
 	}
 
@@ -835,6 +866,17 @@ static void LoadInternal(DatabaseInstance &instance) {
 	{
 		TableFunction add_function("faiss_add", {LogicalType::TABLE, LogicalType::VARCHAR}, nullptr, AddBind,
 		                           AddGlobalInit, AddLocalInit);
+		add_function.in_out_function = AddFunction;
+		add_function.in_out_function_final = AddFinaliseFunction;
+		CreateTableFunctionInfo add_info(add_function);
+		catalog.CreateTableFunction(*con.context, &add_info);
+	}
+
+	{
+		TableFunction add_function(
+		    "faiss_add_params",
+		    {LogicalType::TABLE, LogicalType::VARCHAR, LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR)},
+		    nullptr, AddBind, AddGlobalInit, AddLocalInit);
 		add_function.in_out_function = AddFunction;
 		add_function.in_out_function_final = AddFinaliseFunction;
 		CreateTableFunctionInfo add_info(add_function);

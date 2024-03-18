@@ -132,7 +132,7 @@ go/create_trec: go_binaries
 create_index: go/create_index
 	mkdir -p "indices"
 	${EXTENSION_NAME}_EXTENSION_BINARY_PATH=$(RELEASE_EXT_PATH) go/create_index "IDMap,HNSW128,Flat" "indices/IDMap,HNSW128,Flat.index"
-#	${EXTENSION_NAME}_EXTENSION_BINARY_PATH=$(RELEASE_EXT_PATH) go/create_index "IVF2048,HNSW128,Flat" "indices/IVF2048,HNSW128,Flat.index"
+#	${EXTENSION_NAME}_EXTENSION_BINARY_PATH=$(RELEASE_EXT_PATH) go/create_index "IVF2048_HNSW128,Flat" "indices/IVF2048,HNSW128,Flat.index"
 
 benchmark: go/faissextcode.test
 	go/faissextcode.test -test.run="^$$" -test.bench=. -test.benchtime=30s -test.timeout=12h | tee results

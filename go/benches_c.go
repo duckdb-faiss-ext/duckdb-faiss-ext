@@ -10,39 +10,39 @@ void init() {
 
 	// create the configuration object
 	if (duckdb_create_config(&config) == DuckDBError) {
-		printf("unable to create config");
+		printf("unable to create config\n");
 	}
 	// set some configuration options
 	duckdb_set_config(config, "allow_unsigned_extensions", "true"); // or READ_ONLY
 
 	// open the database using the configuration
 	if (duckdb_open_ext(NULL, &db, config, NULL) == DuckDBError) {
-		printf("unable to open database");
+		printf("unable to open database\n");
 	}
 	if (duckdb_connect(db, &con) == DuckDBError) {
-		printf("unable to open connection");
+		printf("unable to open connection\n");
 	}
 
 	duckdb_state state;
 
 	state = duckdb_query(con, "CREATE TABLE ids AS SELECT (i)::BIGINT AS id, (i%100)::BIGINT AS sel FROM range(0, 8841823) tbl(i)", NULL);
 	if (state == DuckDBError) {
-		printf("unable to create mod table");
+		printf("unable to create mod table\n");
 	}
 
 	state = duckdb_query(con, "LOAD 'build/reldebug/extension/faiss/faiss.duckdb_extension';", NULL);
 	if (state == DuckDBError) {
-		printf("unable to create mod table");
+		printf("unable to create mod table\n");
 	}
 
 	state = duckdb_query(con, "CALL FAISS_LOAD('flat', 'conformanceTests/index_IVF2048');", NULL);
 	if (state == DuckDBError) {
-		printf("unable to load faiss index");
+		printf("unable to load faiss index\n");
 	}
 
 	state = duckdb_query(con, "CREATE TABLE queries AS SELECT qid, vector AS embedding FROM 'conformanceTests/anserini-tools/topics-and-qrels/topics.dl19-passage.openai-ada2.jsonl.gz'", NULL);
 	if (state == DuckDBError) {
-		printf("unable to create queries table");
+		printf("unable to create queries table\n");
 	}
 }
 
