@@ -10,6 +10,7 @@
 #include "duckdb/common/types.hpp"
 #include "duckdb/common/types/data_chunk.hpp"
 #include "duckdb/common/types/selection_vector.hpp"
+#include "duckdb/common/types/value.hpp"
 #include "duckdb/common/types/vector.hpp"
 #include "duckdb/common/unique_ptr.hpp"
 #include "duckdb/common/vector.hpp"
@@ -108,6 +109,8 @@ struct CreateFunctionData : public TableFunctionData {
 	string key;
 	int dimension = 0;
 	string description;
+	shared_ptr<Vector> indexParams = nullptr;
+	uint64_t paramCount = 0;
 };
 
 static unique_ptr<FunctionData> CreateBind(ClientContext &, TableFunctionBindInput &input,
@@ -119,6 +122,14 @@ static unique_ptr<FunctionData> CreateBind(ClientContext &, TableFunctionBindInp
 	result->key = input.inputs[0].ToString();
 	result->dimension = input.inputs[1].GetValue<int>();
 	result->description = input.inputs[2].ToString();
+	if (input.inputs.size() == 4) {
+		vector<Value> paramList = ListValue::GetChildren(input.inputs[3]);
+		Vector v = Vector(input.inputs[3].type());
+		v.Reference(input.inputs[3]);
+
+		result->indexParams = make_shared<Vector>(v);
+		result->paramCount = paramList.size();
+	}
 
 	return std::move(result);
 }
@@ -136,7 +147,6 @@ string getUserParamValue(Vector &userParams, uint64_t paramCount, string key) {
 	}
 	return "";
 }
-
 
 faiss::Index *setIndexParameters(faiss::Index *index, Vector *userParams, uint64_t paramCount) {
 	faiss::IndexIDMap *idmap = dynamic_cast<faiss::IndexIDMap *>(index);
@@ -165,10 +175,12 @@ static void CreateFunction(ClientContext &context, TableFunctionInput &data_p, D
 		throw InvalidInputException("Index %s already exists.", bind_data.key);
 	}
 
+	faiss::Index *index =
+	    faiss::index_factory(bind_data.dimension, bind_data.description.c_str(), faiss::METRIC_INNER_PRODUCT);
+	index = setIndexParameters(index, bind_data.indexParams.get(), bind_data.paramCount);
 	auto entry = make_shared<IndexEntry>();
 	entry->dimension = bind_data.dimension;
-	entry->index = unique_ptr<faiss::Index>(
-	    faiss::index_factory(entry->dimension, bind_data.description.c_str(), faiss::METRIC_INNER_PRODUCT));
+	entry->index = unique_ptr<faiss::Index>(index);
 	entry->needs_training = !entry->index.get()->is_trained;
 	entry->faiss_lock = unique_ptr<std::mutex>(new std::mutex());
 	entry->add_lock = unique_ptr<std::mutex>(new std::mutex());
@@ -610,14 +622,16 @@ void SearchFunction(DataChunk &input, ExpressionState &state, Vector &output) {
 	if (!entry_ptr) {
 		throw InvalidInputException("Could not find index %s.", key);
 	}
-	size_t nQueries = input.size();
-	size_t nResults = input.data[1].GetValue(0).GetValue<int32_t>();
 
+	input.data[2].Flatten(input.size());
+	size_t nQueries = FlatVector::Validity(input.data[2]).CountValid(input.size());
+	size_t nResults = input.data[1].GetValue(0).GetValue<int32_t>();
 	Vector *userParams = nullptr;
 	uint64_t paramCount = 0;
 	if (input.data.size() == 4) {
+		input.data[3].Flatten(input.size());
 		userParams = &input.data[3];
-		paramCount = input.size();
+		paramCount = FlatVector::Validity(input.data[2]).CountValid(input.size());
 	}
 
 	unique_ptr<faiss::SearchParameters> searchParams =
@@ -858,6 +872,15 @@ static void LoadInternal(DatabaseInstance &instance) {
 
 	{
 		TableFunction create_func("faiss_create", {LogicalType::VARCHAR, LogicalType::INTEGER, LogicalType::VARCHAR},
+		                          CreateFunction, CreateBind);
+		CreateTableFunctionInfo create_info(create_func);
+		catalog.CreateTableFunction(*con.context, &create_info);
+	}
+
+	{
+		TableFunction create_func("faiss_create_params",
+		                          {LogicalType::VARCHAR, LogicalType::INTEGER, LogicalType::VARCHAR,
+		                           LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR)},
 		                          CreateFunction, CreateBind);
 		CreateTableFunctionInfo create_info(create_func);
 		catalog.CreateTableFunction(*con.context, &create_info);
