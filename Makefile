@@ -107,14 +107,6 @@ test_debug_python: debug_python
 test_release_python: release_python
 	cd test/python && ${EXTENSION_NAME}_EXTENSION_BINARY_PATH=$(RELEASE_EXT_PATH) python3 -m pytest
 
-create_msmarco_index: release_python
-	cd conformanceTests && ${EXTENSION_NAME}_EXTENSION_BINARY_PATH=$(RELEASE_EXT_PATH) python make_index.py
-
-conformanceTests/index: create_msmarco_index
-
-run_msmarco_queries: conformanceTests/index
-	cd conformanceTests && python execute_queries.py
-
 GOLINKFLAGS=-L$(PROJ_DIR)/go/deps/linux_amd64 -lduckdb -lduckdb_utf8proc -lduckdb_pg_query -lduckdb_re2 -lduckdb_fmt -lduckdb_hyperloglog -lduckdb_fastpforlib -lduckdb_miniz -lduckdb_mbedtls -lduckdb_fsst -ljson_extension -licu_extension -lfts_extension -ljemalloc_extension -lparquet_extension -ltpcds_extension -ltpch_extension -lvisualizer_extension -lfaiss_extension -lomp -lblas -llapack -lm -lstdc++ -fsanitize=undefined
 
 go_binaries: reldebug_go
@@ -129,10 +121,11 @@ go/faissextcode.test: go_binaries
 go/create_index: go_binaries
 go/create_trec: go_binaries
 
-create_index: go/create_index
+indices/%:
 	mkdir -p "indices"
-	${EXTENSION_NAME}_EXTENSION_BINARY_PATH=$(RELEASE_EXT_PATH) go/create_index "IDMap,HNSW128,Flat" "indices/IDMap,HNSW128,Flat.index"
-#	${EXTENSION_NAME}_EXTENSION_BINARY_PATH=$(RELEASE_EXT_PATH) go/create_index "IVF2048_HNSW128,Flat" "indices/IVF2048,HNSW128,Flat.index"
+	${EXTENSION_NAME}_EXTENSION_BINARY_PATH=$(RELEASE_EXT_PATH) go/create_index $(notdir $@) "$@.index"
+
+create_indices: indices/IDMap,HNSW128,Flat indices/IVF2048_HNSW128,Flat
 
 benchmark: go/faissextcode.test
 	go/faissextcode.test -test.run="^$$" -test.bench=. -test.benchtime=30s -test.timeout=12h | tee results
