@@ -51,12 +51,7 @@ release:
 
 reldebug:
 	mkdir -p build/reldebug && \
-	cmake $(GENERATOR) $(FORCE_COLOR) $(EXTENSION_FLAGS) ${CLIENT_FLAGS} -DEXTENSION_STATIC_BUILD=1 -DBUILD_BENCHMARKS=1 -DCMAKE_BUILD_TYPE=RelWithDebInfo ${BUILD_FLAGS} -S ./duckdb/ -B build/reldebug && \
-	cmake --build build/reldebug --config RelWithDebInfo
-
-benchmark:
-	mkdir -p build/reldebug && \
-	cmake $(GENERATOR) $(FORCE_COLOR) $(EXTENSION_FLAGS) ${CLIENT_FLAGS} -DCMAKE_BUILD_TYPE=RelWithDebInfo ${BUILD_FLAGS} -DBUILD_BENCHMARKS=1 -S ./duckdb/ -B build/reldebug && \
+	cmake $(GENERATOR) $(FORCE_COLOR) $(EXTENSION_FLAGS) ${CLIENT_FLAGS} -DEXTENSION_STATIC_BUILD=1 -DCMAKE_BUILD_TYPE=RelWithDebInfo ${BUILD_FLAGS} -S ./duckdb/ -B build/reldebug && \
 	cmake --build build/reldebug --config RelWithDebInfo
 
 # Client build
