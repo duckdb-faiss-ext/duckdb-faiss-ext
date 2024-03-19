@@ -151,7 +151,8 @@ string getUserParamValue(Vector &userParams, uint64_t paramCount, string key) {
 faiss::Index *setIndexParameters(faiss::Index *index, Vector *userParams, uint64_t paramCount) {
 	faiss::IndexIDMap *idmap = dynamic_cast<faiss::IndexIDMap *>(index);
 	if (idmap) {
-		return setIndexParameters(idmap->index, userParams, paramCount);
+		idmap->index = setIndexParameters(idmap->index, userParams, paramCount);
+		return idmap;
 	}
 
 	faiss::IndexHNSW *hnsw = dynamic_cast<faiss::IndexHNSW *>(index);
@@ -577,16 +578,21 @@ void searchIntoVector(ClientContext &ctx, IndexEntry &entry, Vector inputdata, s
 	}
 }
 
-unique_ptr<faiss::SearchParameters> createSearchParameters(faiss::Index *index, faiss::IDSelector *selector,
-                                                           Vector *userParams, uint64_t paramCount) {
+unique_ptr<faiss::SearchParameters> innerCreateSearchParameters(faiss::Index *index, faiss::IDSelector *selector,
+                                                                Vector *userParams, uint64_t paramCount,
+                                                                string prefix) {
 	faiss::IndexIDMap *idmap = dynamic_cast<faiss::IndexIDMap *>(index);
 	if (idmap) {
-		return createSearchParameters(idmap->index, selector, userParams, paramCount);
+		return innerCreateSearchParameters(idmap->index, selector, userParams, paramCount, prefix);
 	}
-	void *ivf = dynamic_cast<faiss::IndexIVF *>(index);
+	faiss::IndexIVF *ivf = dynamic_cast<faiss::IndexIVF *>(index);
 	if (ivf) {
 		unique_ptr<faiss::SearchParametersIVF> searchParams = make_uniq<faiss::SearchParametersIVF>();
 		searchParams->sel = selector;
+
+		searchParams->quantizer_params =
+		    innerCreateSearchParameters(ivf->quantizer, selector, userParams, paramCount, prefix + "ivf.").get();
+
 		// stoi can throw, we should catch and rethrow invalid input exception.
 		string nprobe = getUserParamValue(*userParams, paramCount, "nprobe");
 		if (nprobe != "") {
@@ -610,6 +616,11 @@ unique_ptr<faiss::SearchParameters> createSearchParameters(faiss::Index *index, 
 	unique_ptr<faiss::SearchParameters> searchParams = make_uniq<faiss::SearchParameters>();
 	searchParams->sel = selector;
 	return searchParams;
+}
+
+unique_ptr<faiss::SearchParameters> createSearchParameters(faiss::Index *index, faiss::IDSelector *selector,
+                                                           Vector *userParams, uint64_t paramCount) {
+	return createSearchParameters(index, selector, userParams, paramCount, "");
 }
 
 // TODO: search could be a table function, which would require more copying but
@@ -919,7 +930,7 @@ static void LoadInternal(DatabaseInstance &instance) {
 		CreateScalarFunctionInfo search_info(search_function);
 		catalog.CreateFunction(*con.context, search_info);
 
-		ScalarFunction search_function2("faiss_search2",
+		ScalarFunction search_function2("faiss_search_params",
 		                                {LogicalType::VARCHAR, LogicalType::INTEGER,
 		                                 LogicalType::LIST(LogicalType::ANY),
 		                                 LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR)},
