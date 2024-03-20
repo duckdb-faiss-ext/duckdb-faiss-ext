@@ -1,0 +1,5 @@
+faissextcode.test
+/create_index
+/create_trec
+/plot_results
+deps
