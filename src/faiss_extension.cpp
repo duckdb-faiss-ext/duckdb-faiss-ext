@@ -93,6 +93,32 @@ struct IndexEntry : ObjectCacheEntry {
 	}
 };
 
+// MAP usage functions
+
+string getUserParamValue(Vector &userParams, uint64_t paramCount, string key) {
+	if (paramCount == 0) {
+		return "";
+	}
+	Vector &keys = MapVector::GetKeys(userParams);
+	Vector &values = MapVector::GetValues(userParams);
+	for (uint64_t i = 0; i < paramCount; i++) {
+		if (keys.GetValue(i).GetValue<string>() == key) {
+			return values.GetValue(i).GetValue<string>();
+		}
+	}
+	return "";
+}
+
+std::tuple<shared_ptr<Vector>, uint64_t> mapFromValue(Value v) {
+	vector<Value> paramList = ListValue::GetChildren(v);
+	Vector values = Vector(v);
+	values.Reference(v);
+
+	return std::make_tuple(make_shared<Vector>(v), paramList.size());
+}
+
+// Create function
+
 struct CreateFunctionData : public TableFunctionData {
 	string key;
 	int dimension = 0;
@@ -111,29 +137,10 @@ static unique_ptr<FunctionData> CreateBind(ClientContext &, TableFunctionBindInp
 	result->dimension = input.inputs[1].GetValue<int>();
 	result->description = input.inputs[2].ToString();
 	if (input.inputs.size() == 4) {
-		vector<Value> paramList = ListValue::GetChildren(input.inputs[3]);
-		Vector v = Vector(input.inputs[3].type());
-		v.Reference(input.inputs[3]);
-
-		result->indexParams = make_shared<Vector>(v);
-		result->paramCount = paramList.size();
+		tie(result->indexParams, result->paramCount) = mapFromValue(input.inputs[3]);
 	}
 
 	return std::move(result);
-}
-
-string getUserParamValue(Vector &userParams, uint64_t paramCount, string key) {
-	if (paramCount == 0) {
-		return "";
-	}
-	Vector &keys = MapVector::GetKeys(userParams);
-	Vector &values = MapVector::GetValues(userParams);
-	for (uint64_t i = 0; i < paramCount; i++) {
-		if (keys.GetValue(i).GetValue<string>() == key) {
-			return values.GetValue(i).GetValue<string>();
-		}
-	}
-	return "";
 }
 
 faiss::Index *setIndexParameters(faiss::Index *index, Vector *userParams, uint64_t paramCount) {
@@ -662,7 +669,7 @@ void ProcessSelectionvector(unique_ptr<DataChunk> &chunk, std::vector<uint8_t> &
 		output.resize(max / 8 + 1);
 	}
 
-	// TODO: remove requirements that the input should be alligned
+	// If the input is not sequential or alligned, use the slow path
 	if (!sequential || idBytes[0] % 8 != 0 || size % 8 != 0) {
 		for (int i = 0; i < size; i++) {
 			uint64_t id = idBytes[i];
