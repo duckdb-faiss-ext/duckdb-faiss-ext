@@ -1,11 +1,11 @@
-cmake_minimum_required(VERSION 2.8.12)
+cmake_minimum_required(VERSION 3.9)
 
 # Set extension name here
 set(TARGET_NAME faiss)
 
 set(EXTENSION_NAME ${TARGET_NAME}_extension)
 set(LOADABLE_EXTENSION_NAME ${TARGET_NAME}_loadable_extension)
-project(${TARGET_NAME})
+project(${TARGET_NAME} LANGUAGES CXX)
 include_directories(src/include)
 
 # we don't need other peoples build script (says Hannes)
@@ -23,52 +23,27 @@ set(EXTENSION_SOURCES ${EXTENSION_SOURCES} ${FAISS_SOURCES})
 
 include_directories(faiss/ libomp/omp/build/runtime/src)
 
-# add omp as a target
-set(OMP_STATIC_LIB
-    ${CMAKE_CURRENT_SOURCE_DIR}/libomp/omp/build/runtime/src/libomp.a)
-
-add_custom_command(
-  OUTPUT ${OMP_STATIC_LIB}
-  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-  COMMAND sh ompconfigure)
-
-add_custom_target(BuildOMP DEPENDS ${OMP_STATIC_LIB})
-
-find_package(OpenMP)
-if (OPENMP_FOUND)
-    set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
-    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
-    set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
-endif()
 # create extension targets
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
-
-set(PARAMETERS "-warnings")
 build_loadable_extension(${TARGET_NAME} ${PARAMETERS} ${EXTENSION_SOURCES})
 
-# build omp before the extension
-add_dependencies(${EXTENSION_NAME} BuildOMP)
-
 # link libraries
-target_link_libraries(${EXTENSION_NAME} ${OMP_STATIC_LIB})
-target_link_libraries(${LOADABLE_EXTENSION_NAME} ${OMP_STATIC_LIB})
+find_package(OpenMP REQUIRED)
+target_link_libraries(${EXTENSION_NAME} OpenMP::OpenMP_CXX)
+target_link_libraries(${LOADABLE_EXTENSION_NAME} OpenMP::OpenMP_CXX)
 
-# We do... (really need other peoples build script) - says Arjen
-find_package(MKL)
+find_package(MKL QUIET)
 if(MKL_FOUND)
   target_link_libraries(${EXTENSION_NAME} PRIVATE ${MKL_LIBRARIES})
   target_link_libraries(${LOADABLE_EXTENSION_NAME} PRIVATE ${MKL_LIBRARIES})
-  # target_link_libraries(faiss_avx2 PRIVATE ${MKL_LIBRARIES})
 else()
   find_package(BLAS REQUIRED)
   target_link_libraries(${EXTENSION_NAME} ${BLAS_LIBRARIES})
   target_link_libraries(${LOADABLE_EXTENSION_NAME} ${BLAS_LIBRARIES})
-  # target_link_libraries(faiss_avx2 PRIVATE ${BLAS_LIBRARIES})
 
   find_package(LAPACK REQUIRED)
   target_link_libraries(${EXTENSION_NAME} ${LAPACK_LIBRARIES})
   target_link_libraries(${LOADABLE_EXTENSION_NAME} ${LAPACK_LIBRARIES})
-  # target_link_libraries(faiss_avx2 PRIVATE ${LAPACK_LIBRARIES})
 endif()
 
 if(APPLE)

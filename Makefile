@@ -13,25 +13,11 @@ EXT_NAME_UPPER=FAISS
 EXT_CONFIG=${PROJ_DIR}extension_config.cmake
 include extension-ci-tools/makefiles/duckdb_extension.Makefile
 
-clean:
-	$(MAKE) -f extension-ci-tools/makefiles/duckdb_extension.Makefile clean
-
-	rm -rf libomp
-
 # reldebug isn't defined by the the duckdb extension template
 reldebug:
 	mkdir -p build/reldebug && \
 	cmake $(GENERATOR) ${BUILD_FLAGS} -DCMAKE_BUILD_TYPE=RelWithDebInfo -S ./duckdb/ -B build/reldebug && \
 	cmake --build build/reldebug --config RelWithDebInfo
-
-# Main tests, these don't work in v0.9 yet
-test: test_release
-
-test_release: release
-	./build/release/test/unittest --test-dir . "[sql]"
-
-test_debug: debug
-	./build/debug/test/unittest --test-dir . "[sql]"
 
 # Client tests
 DEBUG_EXT_PATH='$(PROJ_DIR)build/debug/extension/${EXT_NAME}/${EXT_NAME}.duckdb_extension'

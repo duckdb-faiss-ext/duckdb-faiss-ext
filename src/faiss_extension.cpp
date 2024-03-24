@@ -1,5 +1,6 @@
 #include "faiss_extension.hpp"
 
+#include "duckdb/common/error_data.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/helper.hpp"
 #include "duckdb/common/optional_ptr.hpp"
@@ -812,7 +813,7 @@ void SearchFunctionFilter(DataChunk &input, ExpressionState &state, Vector &outp
 	}
 	vector<uint8_t> mask = vector<uint8_t>();
 	unique_ptr<DataChunk> chunk = unique_ptr<DataChunk>();
-	PreservedError error;
+	ErrorData error;
 	while (result->TryFetch(chunk, error) && chunk) {
 		ProcessSelectionvector(chunk, mask);
 	}
@@ -861,7 +862,7 @@ void SearchFunctionFilterSet(DataChunk &input, ExpressionState &state, Vector &o
 	}
 	vector<faiss::idx_t> mask = vector<faiss::idx_t>();
 	unique_ptr<DataChunk> chunk = unique_ptr<DataChunk>();
-	PreservedError error;
+	ErrorData error;
 	while (result->TryFetch(chunk, error) && chunk) {
 		ProcessIncludeSet(chunk, mask);
 	}
