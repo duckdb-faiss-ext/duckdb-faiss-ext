@@ -31,6 +31,7 @@
 #include "faiss/IndexIVF.h"
 #include "faiss/MetricType.h"
 #include "faiss/impl/FaissException.h"
+#include "faiss/impl/HNSW.h"
 #include "faiss/impl/IDSelector.h"
 #include "faiss/index_factory.h"
 #include "faiss/index_io.h"
@@ -656,80 +657,53 @@ void searchIntoVector(ClientContext &ctx, IndexEntry &entry, Vector inputdata, s
 	}
 }
 
-unique_ptr<faiss::SearchParameters> innerCreateSearchParameters(faiss::Index *index, faiss::IDSelector *selector,
-                                                                Vector *userParams, uint64_t paramCount,
-                                                                string prefix) {
+vector<shared_ptr<faiss::SearchParameters>> innerCreateSearchParameters(faiss::Index *index,
+                                                                        faiss::IDSelector *selector, Vector *userParams,
+                                                                        uint64_t paramCount, string prefix) {
 	faiss::IndexIDMap *idmap = dynamic_cast<faiss::IndexIDMap *>(index);
 	if (idmap) {
 		return innerCreateSearchParameters(idmap->index, selector, userParams, paramCount, prefix);
 	}
 	faiss::IndexIVF *ivf = dynamic_cast<faiss::IndexIVF *>(index);
 	if (ivf) {
-		unique_ptr<faiss::SearchParametersIVF> searchParams = make_uniq<faiss::SearchParametersIVF>();
+		shared_ptr<faiss::SearchParametersIVF> searchParams = make_shared<faiss::SearchParametersIVF>();
 		searchParams->sel = selector;
-
-		searchParams->quantizer_params =
-		    innerCreateSearchParameters(ivf->quantizer, selector, userParams, paramCount, prefix + "ivf.").get();
-
+		vector<shared_ptr<faiss::SearchParameters>> ret =
+		    innerCreateSearchParameters(ivf->quantizer, selector, userParams, paramCount, prefix + "quantiser.");
+		searchParams->quantizer_params = ret[0].get();
 		// stoi can throw, we should catch and rethrow invalid input exception.
 		string nprobe = getUserParamValue(*userParams, paramCount, "nprobe");
 		if (nprobe != "") {
 			searchParams->nprobe = std::stoi(nprobe);
 		}
-		return searchParams;
+		ret.insert(ret.begin(), searchParams);
+		return ret;
 	}
 
 	void *hnsw = dynamic_cast<faiss::IndexHNSW *>(index);
 	if (hnsw) {
-		unique_ptr<faiss::SearchParametersHNSW> searchParams = make_uniq<faiss::SearchParametersHNSW>();
+		shared_ptr<faiss::SearchParametersHNSW> searchParams = make_shared<faiss::SearchParametersHNSW>();
 		searchParams->sel = selector;
 		// stoi can throw, we should catch and rethrow invalid input exception.
 		string efSearch = getUserParamValue(*userParams, paramCount, "efSearch");
 		if (efSearch != "") {
 			searchParams->efSearch = std::stoi(efSearch);
 		}
-		return searchParams;
+
+		return vector<shared_ptr<faiss::SearchParameters>>(1, searchParams);
 	}
 
-	unique_ptr<faiss::SearchParameters> searchParams = make_uniq<faiss::SearchParameters>();
+	shared_ptr<faiss::SearchParameters> searchParams = make_shared<faiss::SearchParameters>();
 	searchParams->sel = selector;
-	return searchParams;
+	return vector<shared_ptr<faiss::SearchParameters>>(1, searchParams);
 }
 
-unique_ptr<faiss::SearchParameters> createSearchParameters(faiss::Index *index, faiss::IDSelector *selector,
-                                                           Vector *userParams, uint64_t paramCount) {
-	return createSearchParameters(index, selector, userParams, paramCount, "");
+// The return type is a vector to make sure that the sub-search parameters are kept alive
+vector<shared_ptr<faiss::SearchParameters>> createSearchParameters(faiss::Index *index, faiss::IDSelector *selector,
+                                                                   Vector *userParams, uint64_t paramCount) {
+	return innerCreateSearchParameters(index, selector, userParams, paramCount, "");
 }
 
-// TODO: search could be a table function, which would require more copying but
-// could result in allowing duckdb to "ask for more" if needed
-void SearchFunction(DataChunk &input, ExpressionState &state, Vector &output) {
-	string key = input.data[0].GetValue(0).ToString();
-
-	auto &object_cache = ObjectCache::GetObjectCache(state.GetContext());
-	auto entry_ptr = object_cache.Get<IndexEntry>(key);
-	if (!entry_ptr) {
-		throw InvalidInputException("Could not find index %s.", key);
-	}
-
-	input.data[2].Flatten(input.size());
-	size_t nQueries = FlatVector::Validity(input.data[2]).CountValid(input.size());
-	size_t nResults = input.data[1].GetValue(0).GetValue<int32_t>();
-	Vector *userParams = nullptr;
-	uint64_t paramCount = 0;
-	if (input.data.size() == 4) {
-		input.data[3].Flatten(input.size());
-		userParams = &input.data[3];
-		paramCount = FlatVector::Validity(input.data[2]).CountValid(input.size());
-	}
-
-	unique_ptr<faiss::SearchParameters> searchParams =
-	    createSearchParameters(entry_ptr->index.get(), NULL, userParams, paramCount);
-
-	searchIntoVector(state.GetContext(), *entry_ptr, input.data[2], nQueries, nResults, searchParams.get(), output);
-}
-
-// TODO: ensure that the input vectors are ordered in the query itself??
 void ProcessSelectionvector(unique_ptr<DataChunk> &chunk, std::vector<uint8_t> &output) {
 	Vector data = chunk->data[0];
 	Vector ids = chunk->data[1];
@@ -774,6 +748,41 @@ void ProcessSelectionvector(unique_ptr<DataChunk> &chunk, std::vector<uint8_t> &
 	}
 }
 
+void ProcessIncludeSet(unique_ptr<DataChunk> &chunk, std::vector<faiss::idx_t> &output) {
+	Vector ids = chunk->data[0];
+	uint64_t *__restrict__ idBytes = (uint64_t *)ids.GetData();
+
+	idx_t target = output.size();
+	output.resize(output.size() + chunk->size());
+	memcpy(&output[target], idBytes, chunk->size() * sizeof(faiss::idx_t));
+}
+
+// TODO: search could be a table function, which would require more copying but
+// could result in allowing duckdb to "ask for more" if needed
+void SearchFunction(DataChunk &input, ExpressionState &state, Vector &output) {
+	string key = input.data[0].GetValue(0).ToString();
+
+	auto &object_cache = ObjectCache::GetObjectCache(state.GetContext());
+	auto entry_ptr = object_cache.Get<IndexEntry>(key);
+	if (!entry_ptr) {
+		throw InvalidInputException("Could not find index %s.", key);
+	}
+
+	input.data[2].Flatten(input.size());
+	size_t nQueries = FlatVector::Validity(input.data[2]).CountValid(input.size());
+	size_t nResults = input.data[1].GetValue(0).GetValue<int32_t>();
+	shared_ptr<Vector> userParams = nullptr;
+	uint64_t paramCount = 0;
+	if (input.data.size() == 4) {
+		tie(userParams, paramCount) = mapFromValue(input.data[3].GetValue(0));
+	}
+
+	vector<shared_ptr<faiss::SearchParameters>> searchParams =
+	    createSearchParameters(entry_ptr->index.get(), NULL, userParams.get(), paramCount);
+
+	searchIntoVector(state.GetContext(), *entry_ptr, input.data[2], nQueries, nResults, searchParams[0].get(), output);
+}
+
 void SearchFunctionFilter(DataChunk &input, ExpressionState &state, Vector &output) {
 	auto &object_cache = ObjectCache::GetObjectCache(state.GetContext());
 	auto key = input.data[0].GetValue(0).ToString();
@@ -810,23 +819,18 @@ void SearchFunctionFilter(DataChunk &input, ExpressionState &state, Vector &outp
 
 	// create selector
 	faiss::IDSelectorBitmap selector = faiss::IDSelectorBitmap(mask.size(), mask.data());
-	unique_ptr<faiss::SearchParameters> searchParams = createSearchParameters(entry.index.get(), &selector, NULL, 0);
 
 	// === normal search ===
 	size_t nQueries = input.size();
 	size_t nResults = input.data[1].GetValue(0).GetValue<int32_t>();
-
-	searchIntoVector(state.GetContext(), entry, input.data[2], nQueries, nResults, searchParams.get(), output);
-}
-
-// TODO: ensure that the input vectors are ordered in the query itself??
-void ProcessIncludeSet(unique_ptr<DataChunk> &chunk, std::vector<faiss::idx_t> &output) {
-	Vector ids = chunk->data[0];
-	uint64_t *__restrict__ idBytes = (uint64_t *)ids.GetData();
-
-	idx_t target = output.size();
-	output.resize(output.size() + chunk->size());
-	memcpy(&output[target], idBytes, chunk->size() * sizeof(faiss::idx_t));
+	shared_ptr<Vector> userParams = nullptr;
+	uint64_t paramCount = 0;
+	if (input.data.size() == 4) {
+		tie(userParams, paramCount) = mapFromValue(input.data[3].GetValue(0));
+	}
+	vector<shared_ptr<faiss::SearchParameters>> searchParams =
+	    createSearchParameters(entry.index.get(), &selector, NULL, 0);
+	searchIntoVector(state.GetContext(), entry, input.data[2], nQueries, nResults, searchParams[0].get(), output);
 }
 
 void SearchFunctionFilterSet(DataChunk &input, ExpressionState &state, Vector &output) {
@@ -864,13 +868,19 @@ void SearchFunctionFilterSet(DataChunk &input, ExpressionState &state, Vector &o
 
 	// create selector
 	faiss::IDSelectorBatch selector = faiss::IDSelectorBatch(mask.size(), mask.data());
-	unique_ptr<faiss::SearchParameters> searchParams = createSearchParameters(entry.index.get(), &selector, NULL, 0);
 
 	// === normal search ===
 	size_t nQueries = input.size();
 	size_t nResults = input.data[1].GetValue(0).GetValue<int32_t>();
+	shared_ptr<Vector> userParams = nullptr;
+	uint64_t paramCount = 0;
+	if (input.data.size() == 4) {
+		tie(userParams, paramCount) = mapFromValue(input.data[3].GetValue(0));
+	}
+	vector<shared_ptr<faiss::SearchParameters>> searchParams =
+	    createSearchParameters(entry.index.get(), &selector, NULL, 0);
 
-	searchIntoVector(state.GetContext(), entry, input.data[2], nQueries, nResults, searchParams.get(), output);
+	searchIntoVector(state.GetContext(), entry, input.data[2], nQueries, nResults, searchParams[0].get(), output);
 }
 
 // LoadInternal adds the faiss functions to the database
