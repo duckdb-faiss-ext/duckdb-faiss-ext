@@ -906,97 +906,6 @@ static void LoadInternal(DatabaseInstance &instance) {
 	}
 
 	{
-		TableFunction add_function("faiss_add", {LogicalType::TABLE, LogicalType::VARCHAR}, nullptr, AddBind,
-		                           AddGlobalInit, AddLocalInit);
-		add_function.in_out_function = AddFunction;
-		add_function.in_out_function_final = AddFinaliseFunction;
-		CreateTableFunctionInfo add_info(add_function);
-		catalog.CreateTableFunction(*con.context, &add_info);
-	}
-
-	{
-		TableFunction add_function(
-		    "faiss_add_params",
-		    {LogicalType::TABLE, LogicalType::VARCHAR, LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR)},
-		    nullptr, AddBind, AddGlobalInit, AddLocalInit);
-		add_function.in_out_function = AddFunction;
-		add_function.in_out_function_final = AddFinaliseFunction;
-		CreateTableFunctionInfo add_info(add_function);
-		catalog.CreateTableFunction(*con.context, &add_info);
-	}
-
-	{
-		child_list_t<LogicalType> struct_children;
-		struct_children.emplace_back("rank", LogicalType::INTEGER);
-		struct_children.emplace_back("label", LogicalType::BIGINT);
-		struct_children.emplace_back("distance", LogicalType::FLOAT);
-		auto return_type = LogicalType::LIST(LogicalType::STRUCT(std::move(struct_children)));
-
-		ScalarFunction search_function(
-		    "faiss_search", {LogicalType::VARCHAR, LogicalType::INTEGER, LogicalType::LIST(LogicalType::ANY)},
-		    return_type, SearchFunction);
-		CreateScalarFunctionInfo search_info(search_function);
-		catalog.CreateFunction(*con.context, search_info);
-
-		ScalarFunction search_function2("faiss_search_params",
-		                                {LogicalType::VARCHAR, LogicalType::INTEGER,
-		                                 LogicalType::LIST(LogicalType::ANY),
-		                                 LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR)},
-		                                return_type, SearchFunction);
-		CreateScalarFunctionInfo search_info2(search_function2);
-		catalog.CreateFunction(*con.context, search_info2);
-	}
-
-	{
-		child_list_t<LogicalType> struct_children;
-		struct_children.emplace_back("rank", LogicalType::INTEGER);
-		struct_children.emplace_back("label", LogicalType::BIGINT);
-		struct_children.emplace_back("distance", LogicalType::FLOAT);
-		auto return_type = LogicalType::LIST(LogicalType::STRUCT(std::move(struct_children)));
-
-		ScalarFunction search_function_filter("faiss_search_filter",
-		                                      {LogicalType::VARCHAR, LogicalType::INTEGER,
-		                                       LogicalType::LIST(LogicalType::ANY), LogicalType::VARCHAR,
-		                                       LogicalType::VARCHAR, LogicalType::VARCHAR},
-		                                      return_type, SearchFunctionFilter);
-		CreateScalarFunctionInfo search_info(search_function_filter);
-		catalog.CreateFunction(*con.context, search_info);
-	}
-
-	{
-		child_list_t<LogicalType> struct_children;
-		struct_children.emplace_back("rank", LogicalType::INTEGER);
-		struct_children.emplace_back("label", LogicalType::BIGINT);
-		struct_children.emplace_back("distance", LogicalType::FLOAT);
-		auto return_type = LogicalType::LIST(LogicalType::STRUCT(std::move(struct_children)));
-
-		ScalarFunction search_function_filter("faiss_search_filter_set",
-		                                      {LogicalType::VARCHAR, LogicalType::INTEGER,
-		                                       LogicalType::LIST(LogicalType::ANY), LogicalType::VARCHAR,
-		                                       LogicalType::VARCHAR, LogicalType::VARCHAR},
-		                                      return_type, SearchFunctionFilterSet);
-		CreateScalarFunctionInfo search_info(search_function_filter);
-		catalog.CreateFunction(*con.context, search_info);
-	}
-
-	{
-		TableFunction create_func("faiss_destroy", {LogicalType::VARCHAR}, DestroyFunction, DestroyBind);
-		CreateTableFunctionInfo create_info(create_func);
-		catalog.CreateTableFunction(*con.context, &create_info);
-	}
-
-	// manual training
-	{
-		TableFunction manual_train_function("faiss_manual_train", {LogicalType::TABLE, LogicalType::VARCHAR}, nullptr,
-		                                    MTrainBind, MTrainGlobalInit, MTrainLocalInit);
-		manual_train_function.in_out_function = MTrainFunction;
-		manual_train_function.in_out_function_final = MTrainFinaliseFunction;
-		CreateTableFunctionInfo manual_train_info(manual_train_function);
-		catalog.CreateTableFunction(*con.context, &manual_train_info);
-	}
-
-	// IO functions
-	{
 		TableFunction save_function("faiss_save", {LogicalType::VARCHAR, LogicalType::VARCHAR}, SaveFunction, SaveBind);
 		CreateTableFunctionInfo add_info(save_function);
 		catalog.CreateTableFunction(*con.context, &add_info);
@@ -1008,6 +917,94 @@ static void LoadInternal(DatabaseInstance &instance) {
 		catalog.CreateTableFunction(*con.context, &add_info);
 	}
 
+	{
+		TableFunction manual_train_function("faiss_manual_train", {LogicalType::TABLE, LogicalType::VARCHAR}, nullptr,
+		                                    MTrainBind, MTrainGlobalInit, MTrainLocalInit);
+		manual_train_function.in_out_function = MTrainFunction;
+		manual_train_function.in_out_function_final = MTrainFinaliseFunction;
+		CreateTableFunctionInfo manual_train_info(manual_train_function);
+		catalog.CreateTableFunction(*con.context, &manual_train_info);
+	}
+
+	{
+		TableFunction add_function("faiss_add", {LogicalType::TABLE, LogicalType::VARCHAR}, nullptr, AddBind,
+		                           AddGlobalInit, AddLocalInit);
+		add_function.in_out_function = AddFunction;
+		add_function.in_out_function_final = AddFinaliseFunction;
+		CreateTableFunctionInfo add_info(add_function);
+		catalog.CreateTableFunction(*con.context, &add_info);
+	}
+
+	{
+		child_list_t<LogicalType> struct_children;
+		struct_children.emplace_back("rank", LogicalType::INTEGER);
+		struct_children.emplace_back("label", LogicalType::BIGINT);
+		struct_children.emplace_back("distance", LogicalType::FLOAT);
+		auto return_type = LogicalType::LIST(LogicalType::STRUCT(std::move(struct_children)));
+
+		vector<LogicalType> parameters = {LogicalType::VARCHAR, LogicalType::INTEGER,
+		                                  LogicalType::LIST(LogicalType::ANY)};
+
+		ScalarFunction search_function("faiss_search", parameters, return_type, SearchFunction);
+		CreateScalarFunctionInfo search_info(search_function);
+		catalog.CreateFunction(*con.context, search_info);
+
+		parameters.push_back(LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR));
+		ScalarFunction search_function2("faiss_search_params", parameters, return_type, SearchFunction);
+		CreateScalarFunctionInfo search_info2(search_function2);
+		catalog.CreateFunction(*con.context, search_info2);
+	}
+
+	{
+		child_list_t<LogicalType> struct_children;
+		struct_children.emplace_back("rank", LogicalType::INTEGER);
+		struct_children.emplace_back("label", LogicalType::BIGINT);
+		struct_children.emplace_back("distance", LogicalType::FLOAT);
+		auto return_type = LogicalType::LIST(LogicalType::STRUCT(std::move(struct_children)));
+
+		vector<LogicalType> parameters = {
+		    LogicalType::VARCHAR, LogicalType::INTEGER, LogicalType::LIST(LogicalType::ANY),
+		    LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR};
+
+		ScalarFunction search_function("faiss_search_filter", parameters, return_type, SearchFunctionFilter);
+		CreateScalarFunctionInfo search_info(search_function);
+		catalog.CreateFunction(*con.context, search_info);
+
+		parameters.push_back(LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR));
+		ScalarFunction search_function_params("faiss_search_filter_params", parameters, return_type, SearchFunction);
+		CreateScalarFunctionInfo search_info2(search_function_params);
+		catalog.CreateFunction(*con.context, search_info2);
+	}
+
+	{
+		child_list_t<LogicalType> struct_children;
+		struct_children.emplace_back("rank", LogicalType::INTEGER);
+		struct_children.emplace_back("label", LogicalType::BIGINT);
+		struct_children.emplace_back("distance", LogicalType::FLOAT);
+		auto return_type = LogicalType::LIST(LogicalType::STRUCT(std::move(struct_children)));
+
+		vector<LogicalType> parameters = {
+		    LogicalType::VARCHAR, LogicalType::INTEGER, LogicalType::LIST(LogicalType::ANY),
+		    LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR};
+
+		ScalarFunction search_function("faiss_search_filter_set", parameters, return_type, SearchFunctionFilterSet);
+		CreateScalarFunctionInfo search_info(search_function);
+		catalog.CreateFunction(*con.context, search_info);
+
+		parameters.push_back(LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR));
+		ScalarFunction search_function_filter_params("faiss_search_filter_set_params", parameters, return_type,
+		                                             SearchFunction);
+		CreateScalarFunctionInfo search_info_params(search_function_filter_params);
+		catalog.CreateFunction(*con.context, search_info_params);
+	}
+
+	{
+		TableFunction create_func("faiss_destroy", {LogicalType::VARCHAR}, DestroyFunction, DestroyBind);
+		CreateTableFunctionInfo create_info(create_func);
+		catalog.CreateTableFunction(*con.context, &create_info);
+	}
+
+	// manual training
 	con.Commit();
 }
 
