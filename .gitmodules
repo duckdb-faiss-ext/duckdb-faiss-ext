@@ -8,3 +8,6 @@
 [submodule "conformanceTests/anserini-tools"]
 	path = conformanceTests/anserini-tools
 	url = git@github.com:castorini/anserini-tools.git
+[submodule "extension-ci-tools"]
+	path = extension-ci-tools
+	url = git@github.com:duckdb/extension-ci-tools.git
