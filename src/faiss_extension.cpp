@@ -184,6 +184,83 @@ static void CreateFunction(ClientContext &context, TableFunctionInput &data_p, D
 	object_cache.Put(bind_data.key, std::move(entry));
 }
 
+struct SaveFunctionData : public TableFunctionData {
+	string key;
+	string filename;
+};
+
+static unique_ptr<FunctionData> SaveBind(ClientContext &, TableFunctionBindInput &input,
+                                         vector<LogicalType> &return_types, vector<string> &names) {
+	auto result = make_uniq<SaveFunctionData>();
+	return_types.emplace_back(LogicalType::BOOLEAN);
+	names.emplace_back("Success");
+
+	result->key = input.inputs[0].ToString();
+	result->filename = input.inputs[1].ToString();
+
+	return std::move(result);
+}
+
+// Duckdb has a loading and saving mechanism, but this is for tables.
+// Since faiss does not use duckdb tables for data storage we cannot use this integration.
+// It would be nice if there would be a mechanism to associate this with the database, and every
+// save of the database would also include the index. However, this is probably not
+// supported on all export formats, like parquet.
+static void SaveFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &) {
+	SaveFunctionData bind_data = data_p.bind_data->Cast<SaveFunctionData>();
+	auto &object_cache = ObjectCache::GetObjectCache(context);
+
+	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data.key);
+	if (!entry_ptr) {
+		throw InvalidInputException("Could not find index %s.", bind_data.key);
+	}
+
+	auto &entry = *entry_ptr;
+	faiss::Index *index = &*entry.index;
+	faiss::write_index(index, bind_data.filename.c_str());
+}
+
+struct LoadFunctionData : public TableFunctionData {
+	string key;
+	string filename;
+};
+
+static unique_ptr<FunctionData> LoadBind(ClientContext &, TableFunctionBindInput &input,
+                                         vector<LogicalType> &return_types, vector<string> &names) {
+	auto result = make_uniq<LoadFunctionData>();
+	return_types.emplace_back(LogicalType::BOOLEAN);
+	names.emplace_back("Success");
+
+	result->key = input.inputs[0].ToString();
+	result->filename = input.inputs[1].ToString();
+
+	return std::move(result);
+}
+
+// Duckdb has a loading and saving mechanism, but this is for tables.
+// Since faiss does not use duckdb tables for data storage we cannot use this integration.
+// It would be nice if there would be a mechanism to associate this with the database, and every
+// save of the database would also include the index. However, this is probably not
+// supported on all export formats, like parquet.
+static void LoadFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &) {
+	LoadFunctionData bind_data = data_p.bind_data->Cast<LoadFunctionData>();
+	auto &object_cache = ObjectCache::GetObjectCache(context);
+
+	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data.key);
+	if (entry_ptr) {
+		throw InvalidInputException("Could not find index %s.", bind_data.key);
+	}
+
+	auto entry = make_shared<IndexEntry>();
+	entry->index = unique_ptr<faiss::Index>(faiss::read_index(bind_data.filename.c_str()));
+	entry->dimension = entry->index->d;
+	entry->needs_training = !entry->index.get()->is_trained;
+	entry->faiss_lock = unique_ptr<std::mutex>(new std::mutex());
+	entry->add_lock = unique_ptr<std::mutex>(new std::mutex());
+	entry->isMutable = entry->needs_training;
+
+	object_cache.Put(bind_data.key, std::move(entry));
+}
 struct DestroyFunctionData : public TableFunctionData {
 	string key;
 };
@@ -777,7 +854,6 @@ void SearchFunctionFilterSet(DataChunk &input, ExpressionState &state, Vector &o
 	PreservedError error;
 	while (result->TryFetch(chunk, error) && chunk) {
 		ProcessIncludeSet(chunk, mask);
-		// ProcessSelectionvector(chunk, mask);
 	}
 
 	// create selector
@@ -791,86 +867,7 @@ void SearchFunctionFilterSet(DataChunk &input, ExpressionState &state, Vector &o
 	searchIntoVector(state.GetContext(), entry, input.data[2], nQueries, nResults, searchParams.get(), output);
 }
 
-// IO functions
-
-struct SaveFunctionData : public TableFunctionData {
-	string key;
-	string filename;
-};
-
-static unique_ptr<FunctionData> SaveBind(ClientContext &, TableFunctionBindInput &input,
-                                         vector<LogicalType> &return_types, vector<string> &names) {
-	auto result = make_uniq<SaveFunctionData>();
-	return_types.emplace_back(LogicalType::BOOLEAN);
-	names.emplace_back("Success");
-
-	result->key = input.inputs[0].ToString();
-	result->filename = input.inputs[1].ToString();
-
-	return std::move(result);
-}
-
-// Duckdb has a loading and saving mechanism, but this is for tables.
-// Since faiss does not use duckdb tables for data storage we cannot use this integration.
-// It would be nice if there would be a mechanism to associate this with the database, and every
-// save of the database would also include the index. However, this is probably not
-// supported on all export formats, like parquet.
-static void SaveFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &) {
-	SaveFunctionData bind_data = data_p.bind_data->Cast<SaveFunctionData>();
-	auto &object_cache = ObjectCache::GetObjectCache(context);
-
-	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data.key);
-	if (!entry_ptr) {
-		throw InvalidInputException("Could not find index %s.", bind_data.key);
-	}
-
-	auto &entry = *entry_ptr;
-	faiss::Index *index = &*entry.index;
-	faiss::write_index(index, bind_data.filename.c_str());
-}
-
-struct LoadFunctionData : public TableFunctionData {
-	string key;
-	string filename;
-};
-
-static unique_ptr<FunctionData> LoadBind(ClientContext &, TableFunctionBindInput &input,
-                                         vector<LogicalType> &return_types, vector<string> &names) {
-	auto result = make_uniq<LoadFunctionData>();
-	return_types.emplace_back(LogicalType::BOOLEAN);
-	names.emplace_back("Success");
-
-	result->key = input.inputs[0].ToString();
-	result->filename = input.inputs[1].ToString();
-
-	return std::move(result);
-}
-
-// Duckdb has a loading and saving mechanism, but this is for tables.
-// Since faiss does not use duckdb tables for data storage we cannot use this integration.
-// It would be nice if there would be a mechanism to associate this with the database, and every
-// save of the database would also include the index. However, this is probably not
-// supported on all export formats, like parquet.
-static void LoadFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &) {
-	LoadFunctionData bind_data = data_p.bind_data->Cast<LoadFunctionData>();
-	auto &object_cache = ObjectCache::GetObjectCache(context);
-
-	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data.key);
-	if (entry_ptr) {
-		throw InvalidInputException("Could not find index %s.", bind_data.key);
-	}
-
-	auto entry = make_shared<IndexEntry>();
-	entry->index = unique_ptr<faiss::Index>(faiss::read_index(bind_data.filename.c_str()));
-	entry->dimension = entry->index->d;
-	entry->needs_training = !entry->index.get()->is_trained;
-	entry->faiss_lock = unique_ptr<std::mutex>(new std::mutex());
-	entry->add_lock = unique_ptr<std::mutex>(new std::mutex());
-	entry->isMutable = entry->needs_training;
-
-	object_cache.Put(bind_data.key, std::move(entry));
-}
-
+// LoadInternal adds the faiss functions to the database
 static void LoadInternal(DatabaseInstance &instance) {
 	Connection con(instance);
 	con.BeginTransaction();
