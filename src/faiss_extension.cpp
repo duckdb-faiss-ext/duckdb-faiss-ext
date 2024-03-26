@@ -4,7 +4,6 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/helper.hpp"
 #include "duckdb/common/optional_ptr.hpp"
-#include "duckdb/common/preserved_error.hpp"
 #include "duckdb/common/shared_ptr.hpp"
 #include "duckdb/common/types.hpp"
 #include "duckdb/common/types/data_chunk.hpp"
