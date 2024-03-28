@@ -898,7 +898,13 @@ static void LoadInternal(DatabaseInstance &instance) {
 	}
 
 	{
-		TableFunction manual_train_function("faiss_manual_train", {LogicalType::VARCHAR, LogicalType::TABLE}, nullptr,
+		TableFunction create_func("faiss_destroy", {LogicalType::VARCHAR}, DestroyFunction, DestroyBind);
+		CreateTableFunctionInfo create_info(create_func);
+		catalog.CreateTableFunction(*con.context, &create_info);
+	}
+
+	{
+		TableFunction manual_train_function("faiss_manual_train", {LogicalType::TABLE, LogicalType::VARCHAR}, nullptr,
 		                                    MTrainBind, MTrainGlobalInit, MTrainLocalInit);
 		manual_train_function.in_out_function = MTrainFunction;
 		manual_train_function.in_out_function_final = MTrainFinaliseFunction;
@@ -976,12 +982,6 @@ static void LoadInternal(DatabaseInstance &instance) {
 		                                             SearchFunction);
 		CreateScalarFunctionInfo search_info_params(search_function_filter_params);
 		catalog.CreateFunction(*con.context, search_info_params);
-	}
-
-	{
-		TableFunction create_func("faiss_destroy", {LogicalType::VARCHAR}, DestroyFunction, DestroyBind);
-		CreateTableFunctionInfo create_info(create_func);
-		catalog.CreateTableFunction(*con.context, &create_info);
 	}
 
 	// manual training
