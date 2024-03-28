@@ -36,7 +36,7 @@ func main() {
 		fmt.Println("Unable to train the faiss index")
 		return
 	}
-	_, err = db.Exec("CALL FAISS_ADD((SELECT docid, vector FROM input), 'main')")
+	_, err = db.Exec("CALL FAISS_ADD('main', (SELECT docid, vector FROM input))")
 	if err != nil {
 		fmt.Println("Unable to train the faiss index")
 		return

@@ -1,3 +1,4 @@
+#define DUCKDB_EXTENSION_MAIN
 #include "faiss_extension.hpp"
 
 #include "duckdb/common/error_data.hpp"
@@ -42,7 +43,6 @@
 #include <ostream>
 #include <string>
 #include <vector>
-#define DUCKDB_EXTENSION_MAIN
 
 namespace duckdb {
 
@@ -891,7 +891,7 @@ static void LoadInternal(DatabaseInstance &instance) {
 	}
 
 	{
-		TableFunction manual_train_function("faiss_manual_train", {LogicalType::TABLE, LogicalType::VARCHAR}, nullptr,
+		TableFunction manual_train_function("faiss_manual_train", {LogicalType::VARCHAR, LogicalType::TABLE}, nullptr,
 		                                    MTrainBind, MTrainGlobalInit, MTrainLocalInit);
 		manual_train_function.in_out_function = MTrainFunction;
 		manual_train_function.in_out_function_final = MTrainFinaliseFunction;
@@ -900,7 +900,7 @@ static void LoadInternal(DatabaseInstance &instance) {
 	}
 
 	{
-		TableFunction add_function("faiss_add", {LogicalType::TABLE, LogicalType::VARCHAR}, nullptr, AddBind,
+		TableFunction add_function("faiss_add", {LogicalType::VARCHAR, LogicalType::TABLE}, nullptr, AddBind,
 		                           AddGlobalInit, AddLocalInit);
 		add_function.in_out_function = AddFunction;
 		add_function.in_out_function_final = AddFinaliseFunction;
@@ -994,7 +994,8 @@ std::string FaissExtension::Name() {
 extern "C" {
 
 DUCKDB_EXTENSION_API void faiss_init(duckdb::DatabaseInstance &db) {
-	LoadInternal(db);
+    duckdb::DuckDB db_wrapper(db);
+    db_wrapper.LoadExtension<duckdb::FaissExtension>();
 }
 
 DUCKDB_EXTENSION_API const char *faiss_version() {
