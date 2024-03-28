@@ -53,6 +53,8 @@ enum LABELSTATE {
 };
 
 struct IndexEntry : ObjectCacheEntry {
+	unique_ptr<std::mutex>
+	    faiss_lock; // c++11 doesnt have a shared_mutex, introduced in c++14. duckdb is build with c++11
 	unique_ptr<faiss::Index> index;
 
 	// This is true if the index needs training. When adding data
@@ -68,9 +70,6 @@ struct IndexEntry : ObjectCacheEntry {
 	// Whether or not custom labels are used for this index.
 	LABELSTATE custom_labels = UNDECIDED;
 
-	vector<unique_ptr<float[]>> index_data; // Currently I do not see a use for this
-	unique_ptr<std::mutex>
-	    faiss_lock; // c++11 doesnt have a shared_mutex, introduced in c++14. duckdb is build with c++11
 
 	// This keeps track of how many threads are currently adding, this is to make sure that we
 	// only train/push to faiss when there are no threads adding more data. Does not guarantee
