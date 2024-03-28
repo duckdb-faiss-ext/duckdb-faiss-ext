@@ -180,7 +180,7 @@ jobs:
           make release
 
       - name: Test extension
-        if: ${{ matrix.duckdb_arch != 'linux_::warm64'}}
+        if: ${{ matrix.duckdb_arch != 'linux_arm64'}}
         run: |
           make test
 
