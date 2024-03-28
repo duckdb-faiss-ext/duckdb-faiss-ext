@@ -55,8 +55,8 @@ enum LABELSTATE {
 struct IndexEntry : ObjectCacheEntry {
 	unique_ptr<faiss::Index> index;
 
-	// This is true if the index needs training. In the future,
-	// this can also be false if manual training enabled.
+	// This is true if the index needs training. When adding data
+	// this is used to determine if it should re-train or not.
 	bool needs_training = true;
 	// isMutable reflects whether it is possible to add data to this
 	// index while staying consistent.
@@ -65,9 +65,9 @@ struct IndexEntry : ObjectCacheEntry {
 	// needs training (and thus doesnt have any data yet).needs_training
 	bool isMutable = true;
 
+	// Whether or not custom labels are used for this index.
 	LABELSTATE custom_labels = UNDECIDED;
 
-	int dimension = 0; // This can easily be obtained from the index, doing only a pointer dereference.
 	vector<unique_ptr<float[]>> index_data; // Currently I do not see a use for this
 	unique_ptr<std::mutex>
 	    faiss_lock; // c++11 doesnt have a shared_mutex, introduced in c++14. duckdb is build with c++11
@@ -153,7 +153,6 @@ static void CreateFunction(ClientContext &context, TableFunctionInput &data_p, D
 	    faiss::index_factory(bind_data.dimension, bind_data.description.c_str(), faiss::METRIC_INNER_PRODUCT);
 	index = setIndexParameters(index, bind_data.indexParams.get(), bind_data.paramCount);
 	auto entry = make_shared<IndexEntry>();
-	entry->dimension = bind_data.dimension;
 	entry->index = unique_ptr<faiss::Index>(index);
 	entry->needs_training = !entry->index.get()->is_trained;
 	entry->faiss_lock = unique_ptr<std::mutex>(new std::mutex());
@@ -231,7 +230,6 @@ static void LoadFunction(ClientContext &context, TableFunctionInput &data_p, Dat
 
 	auto entry = make_shared<IndexEntry>();
 	entry->index = unique_ptr<faiss::Index>(faiss::read_index(bind_data.filename.c_str()));
-	entry->dimension = entry->index->d;
 	entry->needs_training = !entry->index.get()->is_trained;
 	entry->faiss_lock = unique_ptr<std::mutex>(new std::mutex());
 	entry->add_lock = unique_ptr<std::mutex>(new std::mutex());
@@ -352,9 +350,9 @@ static OperatorResultType MTrainFunction(ExecutionContext &context, TableFunctio
 		    "loaded from disk and don't need training.");
 	}
 
-	auto data_elements = input.size() * entry.dimension;
+	auto data_elements = input.size() * entry.index->d;
 
-	auto child_vec = ListVectorToFaiss(context.client, input.data[0], input.size(), entry.dimension);
+	auto child_vec = ListVectorToFaiss(context.client, input.data[0], input.size(), entry.index->d);
 	auto child_ptr = FlatVector::GetData<float>(*child_vec);
 
 	state.add_lock.get()->lock();
@@ -393,7 +391,7 @@ static OperatorFinalizeResultType MTrainFinaliseFunction(ExecutionContext &conte
 
 	entry.faiss_lock.get()->lock();
 	try {
-		entry.index->train((faiss::idx_t)state.add_data.size() / entry.dimension, &state.add_data[0]);
+		entry.index->train((faiss::idx_t)state.add_data.size() / entry.index->d, &state.add_data[0]);
 	} catch (faiss::FaissException exception) {
 		std::string msg = exception.msg;
 		if (msg.find("should be at least as large as number of clusters") != std::string::npos) {
@@ -407,7 +405,7 @@ static OperatorFinalizeResultType MTrainFinaliseFunction(ExecutionContext &conte
 	}
 
 	entry.faiss_lock.get()->unlock();
-	// Future calls adding data to the index won't train the index anymore.
+	// Future calls to add to the index won't train the index anymore.
 	// They wil directly add to the index.
 	entry.needs_training = false;
 	return OperatorFinalizeResultType::FINISHED;
@@ -443,11 +441,11 @@ static unique_ptr<FunctionData> AddBind(ClientContext &context, TableFunctionBin
 		if (input.input_table_names.size() == 2 && entry_ptr.get()->custom_labels == FALSE) {
 			throw InvalidInputException(
 			    "Tried to insert data with labels, when index was previously added without labels. "
-			    "Cannot mix data with and without labels");
+			    "Cannot mix index data with and without labels");
 		} else if (input.input_table_names.size() == 1 && entry_ptr.get()->custom_labels == TRUE) {
 			throw InvalidInputException(
 			    "Tried to insert data without labels, when index was previously added with labels. "
-			    "Cannot mix data with and without labels");
+			    "Cannot mix index data with and without labels");
 		}
 	}
 
@@ -486,11 +484,11 @@ static OperatorResultType AddFunction(ExecutionContext &context, TableFunctionIn
 		                            "loaded from disk and don't need training.");
 	}
 
-	auto data_elements = input.size() * entry.dimension;
+	auto data_elements = input.size() * entry.index->d;
 	idx_t vector_count = input.size();
 
 	auto child_vec = ListVectorToFaiss(context.client, entry.custom_labels == TRUE ? input.data[1] : input.data[0],
-	                                   input.size(), entry.dimension);
+	                                   input.size(), entry.index->d);
 	auto child_ptr = FlatVector::GetData<float>(*child_vec);
 
 	faiss::idx_t *label_ptr;
@@ -572,7 +570,7 @@ static OperatorFinalizeResultType AddFinaliseFunction(ExecutionContext &context,
 		std::string msg = exception.msg;
 		if (msg.find("should be at least as large as number of clusters") != std::string::npos) {
 			throw InvalidInputException(
-			    "Index needs to be trained, but amount of datapoints is too small. Considere adding more data. (" +
+			    "Index %s needs to be trained, but amount of datapoints is too small. Considere adding more data. (" +
 			        msg + ")",
 			    bind_data.key);
 		} else {
@@ -582,7 +580,7 @@ static OperatorFinalizeResultType AddFinaliseFunction(ExecutionContext &context,
 
 	// We only add data that havn't been added yet, so we skip the data already added
 	faiss::idx_t new_element_count = total_elements - added_elements;
-	float *new_vector_data = &entry.add_data[added_elements * entry.dimension];
+	float *new_vector_data = &entry.add_data[added_elements * entry.index->d];
 	faiss::idx_t *new_label_data = &entry.add_labels[added_elements];
 	if (entry.custom_labels == TRUE) {
 		entry.index->add_with_ids(new_element_count, new_vector_data, new_label_data);
@@ -600,7 +598,7 @@ static OperatorFinalizeResultType AddFinaliseFunction(ExecutionContext &context,
 // results are stored in the outputvector as a struct-type of the form {rank, id, distance}.
 void searchIntoVector(ClientContext &ctx, IndexEntry &entry, Vector inputdata, size_t nQueries, size_t nResults,
                       faiss::SearchParameters *searchParams, Vector &output) {
-	unique_ptr<Vector> child_vec = ListVectorToFaiss(ctx, inputdata, nQueries, entry.dimension);
+	unique_ptr<Vector> child_vec = ListVectorToFaiss(ctx, inputdata, nQueries, entry.index->d);
 	auto child_ptr = FlatVector::GetData<float>(*child_vec);
 
 	unique_ptr<faiss::idx_t[]> labels = unique_ptr<faiss::idx_t[]>(new faiss::idx_t[nQueries * nResults]);
