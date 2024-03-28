@@ -35,6 +35,7 @@
 #include "faiss/impl/IDSelector.h"
 #include "faiss/index_factory.h"
 #include "faiss/index_io.h"
+#include "maputils.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -93,30 +94,6 @@ struct IndexEntry : ObjectCacheEntry {
 		return IndexEntry::ObjectType();
 	}
 };
-
-// MAP usage functions
-
-string getUserParamValue(Vector &userParams, uint64_t paramCount, string key) {
-	if (paramCount == 0) {
-		return "";
-	}
-	Vector &keys = MapVector::GetKeys(userParams);
-	Vector &values = MapVector::GetValues(userParams);
-	for (uint64_t i = 0; i < paramCount; i++) {
-		if (keys.GetValue(i).GetValue<string>() == key) {
-			return values.GetValue(i).GetValue<string>();
-		}
-	}
-	return "";
-}
-
-std::tuple<shared_ptr<Vector>, uint64_t> mapFromValue(Value v) {
-	vector<Value> paramList = ListValue::GetChildren(v);
-	Vector values = Vector(v);
-	values.Reference(v);
-
-	return std::make_tuple(make_shared<Vector>(v), paramList.size());
-}
 
 // Create function
 
@@ -796,7 +773,6 @@ void SearchFunctionFilter(DataChunk &input, ExpressionState &state, Vector &outp
 	// Once possible use prepared statements, currently not possible to use variables for tables (SELECT *
 	// FROM $1 doesnt parse) use std::format in c++20, this is really ugly
 	std::stringstream ss;
-	// Unlike the normal nomenclature, (u)int1 means int of 1 byte, and (u)int8 means 8 bytes.
 	ss << "SELECT CAST(" << input.data[3].GetValue(0).GetValue<string>() << " AS UTINYINT), CAST("
 	   << input.data[4].GetValue(0).GetValue<string>() << " AS BIGINT) from "
 	   << input.data[5].GetValue(0).GetValue<string>();
@@ -829,7 +805,7 @@ void SearchFunctionFilter(DataChunk &input, ExpressionState &state, Vector &outp
 		tie(userParams, paramCount) = mapFromValue(input.data[3].GetValue(0));
 	}
 	vector<shared_ptr<faiss::SearchParameters>> searchParams =
-	    createSearchParameters(entry.index.get(), &selector, NULL, 0);
+	    createSearchParameters(entry.index.get(), &selector, userParams.get(), paramCount);
 	searchIntoVector(state.GetContext(), entry, input.data[2], nQueries, nResults, searchParams[0].get(), output);
 }
 
@@ -878,7 +854,7 @@ void SearchFunctionFilterSet(DataChunk &input, ExpressionState &state, Vector &o
 		tie(userParams, paramCount) = mapFromValue(input.data[3].GetValue(0));
 	}
 	vector<shared_ptr<faiss::SearchParameters>> searchParams =
-	    createSearchParameters(entry.index.get(), &selector, NULL, 0);
+	    createSearchParameters(entry.index.get(), &selector, userParams.get(), paramCount);
 
 	searchIntoVector(state.GetContext(), entry, input.data[2], nQueries, nResults, searchParams[0].get(), output);
 }
