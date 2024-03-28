@@ -12,7 +12,7 @@ create table vectors as SELECT column0 lbl, list_value(column1, column2, column3
 
 
 statement ok
-CALL faiss_add('flat82', (SELECT lbl, emb FROM vectors))
+CALL faiss_add((SELECT lbl, emb FROM vectors), 'flat82')
 
 query II
 WITH

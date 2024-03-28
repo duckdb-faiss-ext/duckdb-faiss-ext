@@ -1,4 +1,3 @@
-#define DUCKDB_EXTENSION_MAIN
 #include "faiss_extension.hpp"
 
 #include "duckdb/common/error_data.hpp"
@@ -6,6 +5,7 @@
 #include "duckdb/common/helper.hpp"
 #include "duckdb/common/optional_ptr.hpp"
 #include "duckdb/common/shared_ptr.hpp"
+#include "duckdb/common/typedefs.hpp"
 #include "duckdb/common/types.hpp"
 #include "duckdb/common/types/data_chunk.hpp"
 #include "duckdb/common/types/value.hpp"
@@ -43,6 +43,7 @@
 #include <ostream>
 #include <string>
 #include <vector>
+#define DUCKDB_EXTENSION_MAIN
 
 namespace duckdb {
 
@@ -69,7 +70,6 @@ struct IndexEntry : ObjectCacheEntry {
 
 	// Whether or not custom labels are used for this index.
 	LABELSTATE custom_labels = UNDECIDED;
-
 
 	// This keeps track of how many threads are currently adding, this is to make sure that we
 	// only train/push to faiss when there are no threads adding more data. Does not guarantee
@@ -728,7 +728,14 @@ void ProcessIncludeSet(unique_ptr<DataChunk> &chunk, std::vector<faiss::idx_t> &
 
 	idx_t target = output.size();
 	output.resize(output.size() + chunk->size());
-	memcpy(&output[target], idBytes, chunk->size() * sizeof(faiss::idx_t));
+	if (sizeof(faiss::idx_t) == sizeof(uint64_t)) {
+		memcpy(&output[target], idBytes, chunk->size() * sizeof(faiss::idx_t));
+	} else {
+		idx_t size = chunk->size();
+		for (idx_t i = 0; i < size; i++) {
+			output[target + i] = idBytes[i];
+		}
+	}
 }
 
 // TODO: search could be a table function, which would require more copying but
@@ -900,7 +907,7 @@ static void LoadInternal(DatabaseInstance &instance) {
 	}
 
 	{
-		TableFunction add_function("faiss_add", {LogicalType::VARCHAR, LogicalType::TABLE}, nullptr, AddBind,
+		TableFunction add_function("faiss_add", {LogicalType::TABLE, LogicalType::VARCHAR}, nullptr, AddBind,
 		                           AddGlobalInit, AddLocalInit);
 		add_function.in_out_function = AddFunction;
 		add_function.in_out_function_final = AddFinaliseFunction;
@@ -994,8 +1001,8 @@ std::string FaissExtension::Name() {
 extern "C" {
 
 DUCKDB_EXTENSION_API void faiss_init(duckdb::DatabaseInstance &db) {
-    duckdb::DuckDB db_wrapper(db);
-    db_wrapper.LoadExtension<duckdb::FaissExtension>();
+	duckdb::DuckDB db_wrapper(db);
+	db_wrapper.LoadExtension<duckdb::FaissExtension>();
 }
 
 DUCKDB_EXTENSION_API const char *faiss_version() {

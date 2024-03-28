@@ -38,7 +38,7 @@ trainig_with_embeddings_rel = create_embeddings_rel(con, training_sample)
 
 vector_length = trainig_with_embeddings_rel.aggregate('max(length(emb))').fetchone()[0]
 con.sql(f"CALL FAISS_CREATE('flat', {vector_length}, 'IDMap,Flat')")
-trainig_with_embeddings_rel.query('training', "CALL FAISS_ADD('flat', (SELECT internal_tweet_id, emb FROM training))")
+trainig_with_embeddings_rel.query('training', "CALL FAISS_ADD((SELECT internal_tweet_id, emb FROM training), 'flat')")
 
 testing_with_embeddings_rel = create_embeddings_rel(con, testing_sample)
 

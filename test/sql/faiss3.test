@@ -17,7 +17,7 @@ statement ok
 SELECT * FROM queries WHERE column0 > 10
 
 statement ok
-CALL faiss_add('flat8', (SELECT column0, list_value(column1, column2, column3, column4, column5, column6, column7, column8) emb FROM training))
+CALL faiss_add((SELECT column0, list_value(column1, column2, column3, column4, column5, column6, column7, column8) emb FROM training), 'flat8')
 
 query I
 SELECT UNNEST(faiss_search('flat8', 2, list_value(column1, column2, column3, column4, column5, column6, column7, column8))) FROM 'test/sql/queries.csv';
