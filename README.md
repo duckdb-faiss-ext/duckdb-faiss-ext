@@ -93,15 +93,12 @@ CALL faiss_create(string name, int dimension, string index_type);
  - `dimension`: The dimensionality of the data.
  - `index_type`: The index type given to [the faiss index factory](https://github.com/facebookresearch/faiss/wiki/The-index-factory). 
 
-### faiss\_create\_params
+And a variant with parameters:
 
 ```sql
-CALL faiss_create_params(string name, int dimension, string index_type, MAP<string, string> parameters);
+CALL faiss_create(string name, int dimension, string index_type, MAP<string, string> parameters);
 ```
 
- - `name`: The name given to the index. Each database can only have a single index per name, this function will crash when you give it a name with an index already attached. These are global, and can be refered to back later.
- - `dimension`: The dimensionality of the data.
- - `index_type`: The index type given to [the faiss index factory](https://github.com/facebookresearch/faiss/wiki/The-index-factory). 
  - `parameters`: The parameters of the index. For example passing `{'efConstruction': '1000'}` when creating an `HNSW` index, will set the efConstruction field to 1000. This is recursive, for example, when using an `IVF` with `HNSW`, `ivf.efConstruction` can be used to set the `efConstruction` value on the `HNSW` index. Note that currently, the implementation is verry limmited. Recursion is only implemented for `IDMap`, and only `efConstruction` is implemented for HNSW. Other than that, no other parameters are implemented. This is because I did not need these for my thesis, but should be easy to add.
 
 ### faiss\_save
@@ -171,17 +168,12 @@ CALL faiss_search(string name, integer k, List q);
  - `k`: The amount of results to be returned.
  - `q`: The query vector for which the nearest neighbors should be computer.
 
-`faiss_search` returns a list of structs with 3 fields: `rank` of type `INTEGER`, `label` of type `BIGINT`, `distance` of type `DISTANCE`. The length of this list is always `k`, even if not enough results were found. In this case the `label` field is `-1`.
-
-### faiss\_search\_params
+And a variant with parameters:
 
 ```sql
-CALL faiss_search_params(string name, integer k, List q, MAP<string, string> parameters);
+CALL faiss_search(string name, integer k, List q, MAP<string, string> parameters);
 ```
 
- - `name`: The name of the index that should be added to.
- - `k`: The amount of results to be returned.
- - `q`: The query vector for which the nearest neighbors should be computer.
  - `parameters`: The parameters for searching the index. For example passing `{'efSearch': '1000'}` when searching`HNSW` index, will set the efSearch field to 1000. This is recursive, for example, when using an `IVF` with `HNSW`, `ivf.efSearch` can be used to set the `efSearch` value for the `HNSW` index. Note that currently, the implementation is verry limmited. Recursion is only implemented for `IDMap` and `IVF`, and only very few fields are implemented. This is because I did not need these for my thesis, but should be easy to add.
 
 `faiss_search` returns a list of structs with 3 fields: `rank` of type `INTEGER`, `label` of type `BIGINT`, `distance` of type `DISTANCE`. The length of this list is always `k`, even if not enough results were found. In this case the `label` field is `-1`.
@@ -200,25 +192,15 @@ CALL faiss_search_filter(string name, integer k, List q, string filter, string i
  - `idselector`: Expression to be used to select the id of the row.
  - `tablename`: The name of the table on which filter and idselector are executed.
 
-`faiss_search_filter` returns a list of structs with 3 fields: `rank` of type `INTEGER`, `label` of type `BIGINT`, `distance` of type `DISTANCE`. The length of this list is always `k`, even if not enough results were found. In this case the `label` field is `-1`.
-
-For context, currently the way this filter is constructed, is by executing approximatly this query: `SELECT {filter}, {idselector} FROM {tablename}`. All the ids for which the filter is `1`, will be selected for search. The amount of rows in `table` is assumed to be equal to the amount of vectors. If this is not the case, the extension might crash. This function creates a bitmap of size `n` where `n` is the size of the table, this operation is `O(n)`. To improve performance, make sure that the ids are incremental, in order, and start at a multiple of 64. This greatly helps the performance of creating the bitmap.
-
-### faiss\_search\_filter\_params
+And a variant with parameters:
 
 ```sql
-CALL faiss_search_filter_params(string name, integer k, List q, MAP<string, string> parameters);
+CALL faiss_search_filter(string name, integer k, List q, MAP<string, string> parameters);
 ```
 
- - `name`: The name of the index that should be added to.
- - `k`: The amount of results to be returned.
- - `q`: The query vector for which the nearest neighbors should be computer.
- - `filter`: Expression to be used to select which rows are selected for search. If this expresion results in a 1 for a certain row, the result of `idselector` will be included in the search.
- - `idselector`: Expression to be used to select the id of the row.
- - `tablename`: The name of the table on which filter and idselector are executed.
  - `parameters`: The parameters for searching the index. For example passing `{'efSearch': '1000'}` when searching`HNSW` index, will set the efSearch field to 1000. This is recursive, for example, when using an `IVF` with `HNSW`, `ivf.efSearch` can be used to set the `efSearch` value for the `HNSW` index. Note that currently, the implementation is verry limmited. Recursion is only implemented for `IDMap` and `IVF`, and only very few fields are implemented. This is because I did not need these for my thesis, but should be easy to add.
 
-`faiss_search_filter_params` returns a list of structs with 3 fields: `rank` of type `INTEGER`, `label` of type `BIGINT`, `distance` of type `DISTANCE`. The length of this list is always `k`, even if not enough results were found. In this case the `label` field is `-1`.
+`faiss_search_filter` returns a list of structs with 3 fields: `rank` of type `INTEGER`, `label` of type `BIGINT`, `distance` of type `DISTANCE`. The length of this list is always `k`, even if not enough results were found. In this case the `label` field is `-1`.
 
 For context, currently the way this filter is constructed, is by executing approximatly this query: `SELECT {filter}, {idselector} FROM {tablename}`. All the ids for which the filter is `1`, will be selected for search. The amount of rows in `table` is assumed to be equal to the amount of vectors. If this is not the case, the extension might crash. This function creates a bitmap of size `n` where `n` is the size of the table, this operation is `O(n)`. To improve performance, make sure that the ids are incremental, in order, and start at a multiple of 64. This greatly helps the performance of creating the bitmap.
 
@@ -236,25 +218,15 @@ CALL faiss_search_filter\_set(string name, integer k, List q, string filter, str
  - `idselector`: Expression to be used to select the id of the row.
  - `tablename`: The name of the table on which filter and idselector are executed.
 
-`faiss_search_filter_set` returns a list of structs with 3 fields: `rank` of type `INTEGER`, `label` of type `BIGINT`, `distance` of type `DISTANCE`. The length of this list is always `k`, even if not enough results were found. In this case the `label` field is `-1`.
-
-For context, currently the way this filter is constructed, is by executing approximatly this query: `SELECT {idselector} FROM {tablename} WHERE {filter}=1`. All the ids for which the filter is `1`, will be selected for search. The amount of rows in `table` is assumed to be equal to the amount of vectors. If this is not the case, the extension might crash. This function creates a set of size `m` where `m` is the amount of vectors that are included in the search, this operation is `O(m)`.
-
-### faiss\_search\_filter\_set\_params
+And a variant with parameters:
 
 ```sql
-CALL faiss_search_filter_set_params(string name, integer k, List q, MAP<string, string> parameters);
+CALL faiss_search_filter_set(string name, integer k, List q, MAP<string, string> parameters);
 ```
 
- - `name`: The name of the index that should be added to.
- - `k`: The amount of results to be returned.
- - `q`: The query vector for which the nearest neighbors should be computer.
- - `filter`: Expression to be used to select which rows are selected for search. If this expresion results in a 1 for a certain row, the result of `idselector` will be included in the search.
- - `idselector`: Expression to be used to select the id of the row.
- - `tablename`: The name of the table on which filter and idselector are executed.
  - `parameters`: The parameters for searching the index. For example passing `{'efSearch': '1000'}` when searching`HNSW` index, will set the efSearch field to 1000. This is recursive, for example, when using an `IVF` with `HNSW`, `ivf.efSearch` can be used to set the `efSearch` value for the `HNSW` index. Note that currently, the implementation is verry limmited. Recursion is only implemented for `IDMap` and `IVF`, and only very few fields are implemented. This is because I did not need these for my thesis, but should be easy to add.
 
-`faiss_search_filter_set_params` returns a list of structs with 3 fields: `rank` of type `INTEGER`, `label` of type `BIGINT`, `distance` of type `DISTANCE`. The length of this list is always `k`, even if not enough results were found. In this case the `label` field is `-1`.
+`faiss_search_filter_set` returns a list of structs with 3 fields: `rank` of type `INTEGER`, `label` of type `BIGINT`, `distance` of type `DISTANCE`. The length of this list is always `k`, even if not enough results were found. In this case the `label` field is `-1`.
 
 For context, currently the way this filter is constructed, is by executing approximatly this query: `SELECT {idselector} FROM {tablename} WHERE {filter}=1`. All the ids for which the filter is `1`, will be selected for search. The amount of rows in `table` is assumed to be equal to the amount of vectors. If this is not the case, the extension might crash. This function creates a set of size `m` where `m` is the amount of vectors that are included in the search, this operation is `O(m)`.
 

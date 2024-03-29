@@ -877,11 +877,12 @@ static void LoadInternal(DatabaseInstance &instance) {
 	}
 
 	{
-		TableFunction create_func("faiss_create_params",
+		TableFunction create_func("faiss_create",
 		                          {LogicalType::VARCHAR, LogicalType::INTEGER, LogicalType::VARCHAR,
 		                           LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR)},
 		                          CreateFunction, CreateBind);
 		CreateTableFunctionInfo create_info(create_func);
+		create_info.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
 		catalog.CreateTableFunction(*con.context, &create_info);
 	}
 
@@ -936,9 +937,10 @@ static void LoadInternal(DatabaseInstance &instance) {
 		catalog.CreateFunction(*con.context, search_info);
 
 		parameters.push_back(LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR));
-		ScalarFunction search_function2("faiss_search_params", parameters, return_type, SearchFunction);
-		CreateScalarFunctionInfo search_info2(search_function2);
-		catalog.CreateFunction(*con.context, search_info2);
+		ScalarFunction search_function2("faiss_search", parameters, return_type, SearchFunction);
+		CreateScalarFunctionInfo search_info_params(search_function2);
+		search_info_params.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
+		catalog.CreateFunction(*con.context, search_info_params);
 	}
 
 	{
@@ -957,9 +959,10 @@ static void LoadInternal(DatabaseInstance &instance) {
 		catalog.CreateFunction(*con.context, search_info);
 
 		parameters.push_back(LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR));
-		ScalarFunction search_function_params("faiss_search_filter_params", parameters, return_type, SearchFunction);
-		CreateScalarFunctionInfo search_info2(search_function_params);
-		catalog.CreateFunction(*con.context, search_info2);
+		ScalarFunction search_function_params("faiss_search_filter", parameters, return_type, SearchFunction);
+		CreateScalarFunctionInfo search_info_params(search_function_params);
+		search_info_params.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
+		catalog.CreateFunction(*con.context, search_info_params);
 	}
 
 	{
@@ -978,9 +981,10 @@ static void LoadInternal(DatabaseInstance &instance) {
 		catalog.CreateFunction(*con.context, search_info);
 
 		parameters.push_back(LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR));
-		ScalarFunction search_function_filter_params("faiss_search_filter_set_params", parameters, return_type,
+		ScalarFunction search_function_filter_params("faiss_search_filter_set", parameters, return_type,
 		                                             SearchFunction);
 		CreateScalarFunctionInfo search_info_params(search_function_filter_params);
+		search_info_params.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
 		catalog.CreateFunction(*con.context, search_info_params);
 	}
 
