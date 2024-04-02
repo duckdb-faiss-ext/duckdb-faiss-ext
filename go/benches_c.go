@@ -30,6 +30,11 @@ void init() {
 		printf("unable to create mod table\n");
 	}
 
+	state = duckdb_query(con, "LOAD json;", NULL);
+	if (state == DuckDBError) {
+		printf("unable to load json extension\n");
+	}
+
 	state = duckdb_query(con, "LOAD 'build/reldebug/extension/faiss/faiss.duckdb_extension';", NULL);
 	if (state == DuckDBError) {
 		printf("unable to create mod table\n");
