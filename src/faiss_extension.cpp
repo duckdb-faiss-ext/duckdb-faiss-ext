@@ -643,7 +643,7 @@ vector<shared_ptr<faiss::SearchParameters>> innerCreateSearchParameters(faiss::I
 		shared_ptr<faiss::SearchParametersIVF> searchParams = make_shared<faiss::SearchParametersIVF>();
 		searchParams->sel = selector;
 		vector<shared_ptr<faiss::SearchParameters>> ret =
-		    innerCreateSearchParameters(ivf->quantizer, selector, userParams, paramCount, prefix + "quantiser.");
+		    innerCreateSearchParameters(ivf->quantizer, NULL, userParams, paramCount, prefix + "quantiser.");
 		searchParams->quantizer_params = ret[0].get();
 		// stoi can throw, we should catch and rethrow invalid input exception.
 		string nprobe = getUserParamValue(*userParams, paramCount, prefix + "nprobe");
