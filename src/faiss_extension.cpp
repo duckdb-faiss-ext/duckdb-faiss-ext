@@ -646,7 +646,7 @@ vector<shared_ptr<faiss::SearchParameters>> innerCreateSearchParameters(faiss::I
 		    innerCreateSearchParameters(ivf->quantizer, selector, userParams, paramCount, prefix + "quantiser.");
 		searchParams->quantizer_params = ret[0].get();
 		// stoi can throw, we should catch and rethrow invalid input exception.
-		string nprobe = getUserParamValue(*userParams, paramCount, "nprobe");
+		string nprobe = getUserParamValue(*userParams, paramCount, prefix + "nprobe");
 		if (nprobe != "") {
 			searchParams->nprobe = std::stoi(nprobe);
 		}
@@ -659,7 +659,7 @@ vector<shared_ptr<faiss::SearchParameters>> innerCreateSearchParameters(faiss::I
 		shared_ptr<faiss::SearchParametersHNSW> searchParams = make_shared<faiss::SearchParametersHNSW>();
 		searchParams->sel = selector;
 		// stoi can throw, we should catch and rethrow invalid input exception.
-		string efSearch = getUserParamValue(*userParams, paramCount, "efSearch");
+		string efSearch = getUserParamValue(*userParams, paramCount, prefix + "efSearch");
 		if (efSearch != "") {
 			searchParams->efSearch = std::stoi(efSearch);
 		}
@@ -805,8 +805,8 @@ void SearchFunctionFilter(DataChunk &input, ExpressionState &state, Vector &outp
 	size_t nResults = input.data[1].GetValue(0).GetValue<int32_t>();
 	shared_ptr<Vector> userParams = nullptr;
 	uint64_t paramCount = 0;
-	if (input.data.size() == 4) {
-		tie(userParams, paramCount) = mapFromValue(input.data[3].GetValue(0));
+	if (input.data.size() == 7) {
+		tie(userParams, paramCount) = mapFromValue(input.data[6].GetValue(0));
 	}
 	vector<shared_ptr<faiss::SearchParameters>> searchParams =
 	    createSearchParameters(entry.index.get(), &selector, userParams.get(), paramCount);
@@ -854,8 +854,8 @@ void SearchFunctionFilterSet(DataChunk &input, ExpressionState &state, Vector &o
 	size_t nResults = input.data[1].GetValue(0).GetValue<int32_t>();
 	shared_ptr<Vector> userParams = nullptr;
 	uint64_t paramCount = 0;
-	if (input.data.size() == 4) {
-		tie(userParams, paramCount) = mapFromValue(input.data[3].GetValue(0));
+	if (input.data.size() == 7) {
+		tie(userParams, paramCount) = mapFromValue(input.data[6].GetValue(0));
 	}
 	vector<shared_ptr<faiss::SearchParameters>> searchParams =
 	    createSearchParameters(entry.index.get(), &selector, userParams.get(), paramCount);
@@ -959,7 +959,7 @@ static void LoadInternal(DatabaseInstance &instance) {
 		catalog.CreateFunction(*con.context, search_info);
 
 		parameters.push_back(LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR));
-		ScalarFunction search_function_params("faiss_search_filter", parameters, return_type, SearchFunction);
+		ScalarFunction search_function_params("faiss_search_filter", parameters, return_type, SearchFunctionFilter);
 		CreateScalarFunctionInfo search_info_params(search_function_params);
 		search_info_params.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
 		catalog.CreateFunction(*con.context, search_info_params);
@@ -982,7 +982,7 @@ static void LoadInternal(DatabaseInstance &instance) {
 
 		parameters.push_back(LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR));
 		ScalarFunction search_function_filter_params("faiss_search_filter_set", parameters, return_type,
-		                                             SearchFunction);
+		                                             SearchFunctionFilterSet);
 		CreateScalarFunctionInfo search_info_params(search_function_filter_params);
 		search_info_params.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
 		catalog.CreateFunction(*con.context, search_info_params);
