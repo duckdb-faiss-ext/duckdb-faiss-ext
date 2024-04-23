@@ -93,12 +93,15 @@ CALL faiss_create(string name, int dimension, string index_type);
  - `dimension`: The dimensionality of the data.
  - `index_type`: The index type given to [the faiss index factory](https://github.com/facebookresearch/faiss/wiki/The-index-factory). 
 
-And a variant with parameters:
+### faiss\_create\_params
 
 ```sql
-CALL faiss_create(string name, int dimension, string index_type, MAP<string, string> parameters);
+CALL faiss_create_params(string name, int dimension, string index_type, MAP<string, string> parameters);
 ```
 
+ - `name`: The name given to the index. Each database can only have a single index per name, this function will crash when you give it a name with an index already attached. These are global, and can be refered to back later.
+ - `dimension`: The dimensionality of the data.
+ - `index_type`: The index type given to [the faiss index factory](https://github.com/facebookresearch/faiss/wiki/The-index-factory). 
  - `parameters`: The parameters of the index. For example passing `{'efConstruction': '1000'}` when creating an `HNSW` index, will set the efConstruction field to 1000. This is recursive, for example, when using an `IVF` with `HNSW`, `ivf.efConstruction` can be used to set the `efConstruction` value on the `HNSW` index. Note that currently, the implementation is verry limmited. Recursion is only implemented for `IDMap`, and only `efConstruction` is implemented for HNSW. Other than that, no other parameters are implemented. This is because I did not need these for my thesis, but should be easy to add.
 
 ### faiss\_save

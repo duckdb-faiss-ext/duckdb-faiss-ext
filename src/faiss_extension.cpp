@@ -785,7 +785,7 @@ void SearchFunctionFilter(DataChunk &input, ExpressionState &state, Vector &outp
 
 	shared_ptr<DatabaseInstance> db = state.GetContext().db;
 	shared_ptr<ClientContext> subcommection = make_shared<ClientContext>(db);
-	unique_ptr<QueryResult> result = subcommection->Query(filterExpression, true);
+	unique_ptr<QueryResult> result = subcommection->Query(filterExpression, false);
 
 	if (result->HasError()) {
 		throw InvalidInputException("uable to execute filter query: %s", result->GetError());
@@ -834,7 +834,7 @@ void SearchFunctionFilterSet(DataChunk &input, ExpressionState &state, Vector &o
 
 	shared_ptr<DatabaseInstance> db = state.GetContext().db;
 	shared_ptr<ClientContext> subcommection = make_shared<ClientContext>(db);
-	unique_ptr<QueryResult> result = subcommection->Query(filterExpression, true);
+	unique_ptr<QueryResult> result = subcommection->Query(filterExpression, false);
 
 	if (result->HasError()) {
 		throw InvalidInputException("uable to execute filter query: %s", result->GetError());
@@ -877,12 +877,11 @@ static void LoadInternal(DatabaseInstance &instance) {
 	}
 
 	{
-		TableFunction create_func("faiss_create",
+		TableFunction create_func("faiss_create_params",
 		                          {LogicalType::VARCHAR, LogicalType::INTEGER, LogicalType::VARCHAR,
 		                           LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR)},
 		                          CreateFunction, CreateBind);
 		CreateTableFunctionInfo create_info(create_func);
-		create_info.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
 		catalog.CreateTableFunction(*con.context, &create_info);
 	}
 
