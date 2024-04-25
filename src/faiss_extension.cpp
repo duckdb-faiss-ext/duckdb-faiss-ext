@@ -490,9 +490,9 @@ static OperatorResultType AddFunction(ExecutionContext &context, TableFunctionIn
 	                                   input.size(), entry.index->d);
 	auto child_ptr = FlatVector::GetData<float>(*child_vec);
 
+	Vector label_cast_vec(LogicalType::BIGINT);
 	faiss::idx_t *label_ptr;
 	if (entry.custom_labels == TRUE) {
-		Vector label_cast_vec(LogicalType::BIGINT);
 		VectorOperations::Cast(context.client, input.data[0], label_cast_vec, input.size());
 		label_ptr = FlatVector::GetData<faiss::idx_t>(label_cast_vec);
 	}
