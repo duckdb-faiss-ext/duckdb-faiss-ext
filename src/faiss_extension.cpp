@@ -737,7 +737,7 @@ void ProcessSelectionvector(unique_ptr<DataChunk> &chunk, std::vector<uint8_t> &
 	} else {
 		int i = 0;
 		int id = start;
-		for (; id % 8 == 0;) {
+		for (; id % 8 != 0;) {
 			output[id / 8] = output[id / 8] | (dataBytes[i] << (id % 8));
 			i++;
 			id++;
@@ -826,11 +826,10 @@ static unique_ptr<LocalTableFunctionState> SelLocalInit(ExecutionContext &contex
 
 static OperatorResultType SelFunction(ExecutionContext &context, TableFunctionInput &data_p, DataChunk &input,
                                       DataChunk &) {
-
-	SelState &state = data_p.global_state->Cast<SelState>();
+	SelState *state = (SelState *)data_p.global_state.get();
 	unique_ptr<DataChunk> chunk = make_uniq<DataChunk>();
-	state.chunk->ReferenceColumns(input, vector<column_t> {0, 1});
-	ProcessSelectionvector(chunk, state.mask);
+	state->chunk->ReferenceColumns(input, vector<column_t> {0, 1});
+	ProcessSelectionvector(state->chunk, state->mask);
 
 	return OperatorResultType::NEED_MORE_INPUT;
 }
@@ -846,15 +845,13 @@ static OperatorFinalizeResultType SelFinaliseFunction(ExecutionContext &context,
 		throw InvalidInputException("Could not find index %s.", bind_data.key);
 	}
 
-	auto &entry = *entry_ptr;
-
 	state.currently_adding--;
 	if (state.currently_adding != 0) {
 		state.lock.get()->unlock();
 		return OperatorFinalizeResultType::FINISHED;
 	}
 
-	entry.mask_tmp = state.mask;
+	entry_ptr->mask_tmp = state.mask;
 	state.lock->unlock();
 	return OperatorFinalizeResultType::FINISHED;
 }
