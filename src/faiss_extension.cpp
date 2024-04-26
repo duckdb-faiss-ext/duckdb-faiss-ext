@@ -685,29 +685,48 @@ vector<shared_ptr<faiss::SearchParameters>> createSearchParameters(faiss::Index 
 }
 
 void ProcessSelectionvector(unique_ptr<DataChunk> &chunk, std::vector<uint8_t> &output) {
-	Vector data = chunk->data[0];
-	Vector ids = chunk->data[1];
-	uint8_t *__restrict__ dataBytes = data.GetData();
-	uint64_t *__restrict__ idBytes = (uint64_t *)ids.GetData();
 	idx_t size = chunk->size();
 	if (size == 0) {
 		return;
 	}
+	Vector data = chunk->data[0];
+	Vector ids = chunk->data[1];
+	uint8_t *__restrict__ dataBytes = data.GetData();
 
-	uint64_t max = 0;
-	bool sequential = true;
-	uint64_t previous = idBytes[0] - 1;
-	for (int i = 0; i < size; i++) {
-		max = MaxValue(max, idBytes[i]);
-		sequential &= idBytes[i] == previous + 1;
-		previous = idBytes[i];
+	bool sequential;
+	uint64_t start;
+	uint64_t max;
+	switch (ids.GetVectorType()) {
+	case VectorType::SEQUENCE_VECTOR: {
+		int64_t sstart, increment, sequence_count;
+		SequenceVector::GetSequence(ids, sstart, increment, sequence_count);
+		start = sstart;
+		max = start + increment * sequence_count;
+		sequential = increment == 1 && start >= 0;
+		break;
 	}
+	default:
+		ids.Flatten(size); // TODO: we can do without the flatten!
+		uint64_t *__restrict__ idBytes = (uint64_t *)ids.GetData();
+
+		uint64_t previous = idBytes[0] - 1;
+		sequential = true;
+		start = idBytes[0];
+		max = 0;
+		for (int i = 0; i < size; i++) {
+			max = MaxValue(max, idBytes[i]);
+			sequential &= idBytes[i] == previous + 1;
+			previous = idBytes[i];
+		}
+	}
+
 	if (output.size() <= max / 8) {
 		output.resize(max / 8 + 1);
 	}
 
 	// If the input is not sequential or alligned, use the slow path
-	if (!sequential || idBytes[0] % 8 != 0 || size % 8 != 0) {
+	if (!sequential) {
+		uint64_t *__restrict__ idBytes = (uint64_t *)ids.GetData();
 		for (int i = 0; i < size; i++) {
 			uint64_t id = idBytes[i];
 			int arrIndex = id / 8;
@@ -717,13 +736,25 @@ void ProcessSelectionvector(unique_ptr<DataChunk> &chunk, std::vector<uint8_t> &
 		}
 	} else {
 		int i = 0;
-		int arrIndex = idBytes[0] / 8;
+		int id = start;
+		for (; id % 8 == 0;) {
+			output[id / 8] = output[id / 8] | (dataBytes[i] << (id % 8));
+			i++;
+			id++;
+		}
+		int arrIndex = id / 8;
 		for (; i < size - 8;) {
 			output[arrIndex] = (dataBytes[i + 0] << 0) | (dataBytes[i + 1] << 1) | (dataBytes[i + 2] << 2) |
 			                   (dataBytes[i + 3] << 3) | (dataBytes[i + 4] << 4) | (dataBytes[i + 5] << 5) |
 			                   (dataBytes[i + 6] << 6) | (dataBytes[i + 7] << 7);
 			i += 8;
 			arrIndex += 1;
+		}
+		id = arrIndex * 8;
+		for (; i < size;) {
+			output[arrIndex] = output[arrIndex] | (dataBytes[i] << (id % 8));
+			i++;
+			id++;
 		}
 	}
 }
