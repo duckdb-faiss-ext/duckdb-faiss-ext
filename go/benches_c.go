@@ -73,7 +73,7 @@ void run_sel(uint64_t N, uint32_t p) {
 	duckdb_result result;
 	duckdb_state state;
 	char *query = (char*)malloc(1000 * sizeof(char));
-	sprintf(query, "SELECT qid, UNNEST(faiss_search_filter('flat', 10, embedding, 'sel<%d', 'rowid', 'ids')) FROM queries", p);
+	sprintf(query, "SELECT * FROM (SELECT qid, UNNEST(faiss_search_filter('flat', 10, embedding, 'sel<%d', 'rowid', 'ids'), recursive:=true) FROM queries) JOIN ids ON label=id", p);
 	for (int i = 0; i < N; i++) {
 		state = duckdb_query(con, query, &result);
 		if (state == DuckDBError) {
@@ -91,7 +91,7 @@ void run_set(uint64_t N, uint32_t p) {
 	duckdb_result result;
 	duckdb_state state;
 	char *query = (char*)malloc(1000 * sizeof(char));
-	sprintf(query, "SELECT qid, UNNEST(faiss_search_filter_set('flat', 10, embedding, 'sel<%d', 'rowid', 'ids')) FROM queries", p);
+	sprintf(query, "SELECT * FROM (SELECT qid, UNNEST(faiss_search_filter_set('flat', 10, embedding, 'sel<%d', 'rowid', 'ids'), recursive:=true) FROM queries) JOIN ids ON label=id", p);
 	for (int i = 0; i < N; i++) {
 		state = duckdb_query(con, query, &result);
 		if (state == DuckDBError) {
