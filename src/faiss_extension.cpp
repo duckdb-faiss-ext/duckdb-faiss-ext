@@ -14,6 +14,7 @@
 #include "duckdb/common/vector.hpp"
 #include "duckdb/execution/execution_context.hpp"
 #include "duckdb/execution/expression_executor.hpp"
+#include "duckdb/function/function.hpp"
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/function/table_function.hpp"
 #include "duckdb/main/client_context.hpp"
@@ -84,6 +85,11 @@ struct IndexEntry : ObjectCacheEntry {
 	size_t size = 0;
 	// keeps track of how many vectors have been added
 	size_t added = 0;
+
+	// Lock making sure only one thread uses the mask at a time
+	unique_ptr<std::mutex> mask_lock = unique_ptr<std::mutex>(new std::mutex());
+	// Temporary storage for selection mask
+	vector<uint8_t> mask_tmp;
 
 	static string ObjectType() {
 		return "faiss_index";
@@ -738,6 +744,90 @@ void ProcessIncludeSet(unique_ptr<DataChunk> &chunk, std::vector<faiss::idx_t> &
 	}
 }
 
+struct SelState : public GlobalTableFunctionState {
+	// This keeps track of how many threads are currently adding, this is to make sure that we
+	// only train/push to faiss when there are no threads adding more data. Does not guarantee
+	// that all data has been added, as some threads may just have not been started yet
+	std::atomic_uint64_t currently_adding;
+	unique_ptr<std::mutex> lock = unique_ptr<std::mutex>(new std::mutex());
+	vector<uint8_t> mask;
+	unique_ptr<DataChunk> chunk;
+};
+
+struct SelData : public TableFunctionData {
+	string key;
+};
+
+static unique_ptr<TableFunctionData> SelBind(ClientContext &context, TableFunctionBindInput &input,
+                                             vector<LogicalType> &return_types, vector<string> &names) {
+	auto bind_data = make_uniq<SelData>();
+
+	return_types.emplace_back(LogicalType::BOOLEAN);
+	names.emplace_back("Success");
+
+	bind_data->key = input.inputs[2].ToString();
+
+	auto &object_cache = ObjectCache::GetObjectCache(context);
+	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data->key);
+	if (!entry_ptr) {
+		throw InvalidInputException("Could not find index %s.", bind_data->key);
+	}
+
+	return bind_data;
+}
+
+static unique_ptr<GlobalTableFunctionState> SelGlobalInit(ClientContext &context, TableFunctionInitInput &input) {
+	unique_ptr<SelState> state = make_uniq<SelState>();
+	state->chunk = make_uniq<DataChunk>();
+	state->chunk->Initialize(context, vector<LogicalType> {LogicalType::UTINYINT, LogicalType::BIGINT});
+
+	return state;
+}
+
+static unique_ptr<LocalTableFunctionState> SelLocalInit(ExecutionContext &context, TableFunctionInitInput &data_p,
+                                                        GlobalTableFunctionState *global_state) {
+	SelState &state = global_state->Cast<SelState>();
+	state.currently_adding++;
+	state.lock->lock();
+
+	return make_uniq<LocalTableFunctionState>();
+}
+
+static OperatorResultType SelFunction(ExecutionContext &context, TableFunctionInput &data_p, DataChunk &input,
+                                      DataChunk &) {
+
+	SelState &state = data_p.global_state->Cast<SelState>();
+	unique_ptr<DataChunk> chunk = make_uniq<DataChunk>();
+	state.chunk->ReferenceColumns(input, vector<column_t> {0, 1});
+	ProcessSelectionvector(chunk, state.mask);
+
+	return OperatorResultType::NEED_MORE_INPUT;
+}
+
+static OperatorFinalizeResultType SelFinaliseFunction(ExecutionContext &context, TableFunctionInput &data_p,
+                                                      DataChunk &) {
+	SelState &state = data_p.global_state->Cast<SelState>();
+
+	auto bind_data = data_p.bind_data->Cast<AddData>();
+	auto &object_cache = ObjectCache::GetObjectCache(context.client);
+	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data.key);
+	if (!entry_ptr) {
+		throw InvalidInputException("Could not find index %s.", bind_data.key);
+	}
+
+	auto &entry = *entry_ptr;
+
+	state.currently_adding--;
+	if (state.currently_adding != 0) {
+		state.lock.get()->unlock();
+		return OperatorFinalizeResultType::FINISHED;
+	}
+
+	entry.mask_tmp = state.mask;
+	state.lock->unlock();
+	return OperatorFinalizeResultType::FINISHED;
+}
+
 // TODO: search could be a table function, which would require more copying but
 // could result in allowing duckdb to "ask for more" if needed
 void SearchFunction(DataChunk &input, ExpressionState &state, Vector &output) {
@@ -777,9 +867,9 @@ void SearchFunctionFilter(DataChunk &input, ExpressionState &state, Vector &outp
 	// Once possible use prepared statements, currently not possible to use variables for tables (SELECT *
 	// FROM $1 doesnt parse) use std::format in c++20, this is really ugly
 	std::stringstream ss;
-	ss << "SELECT CAST(" << input.data[3].GetValue(0).GetValue<string>() << " AS UTINYINT), CAST("
-	   << input.data[4].GetValue(0).GetValue<string>() << " AS BIGINT) from "
-	   << input.data[5].GetValue(0).GetValue<string>();
+	ss << "CALL __faiss_create_mask((SELECT CAST(" << input.data[3].GetValue(0).GetValue<string>()
+	   << " AS UTINYINT), CAST(" << input.data[4].GetValue(0).GetValue<string>() << " AS BIGINT) from "
+	   << input.data[5].GetValue(0).GetValue<string>() << "), " << key << ") ";
 
 	string filterExpression = ss.str();
 
@@ -790,15 +880,13 @@ void SearchFunctionFilter(DataChunk &input, ExpressionState &state, Vector &outp
 	if (result->HasError()) {
 		throw InvalidInputException("uable to execute filter query: %s", result->GetError());
 	}
-	vector<uint8_t> mask = vector<uint8_t>();
 	unique_ptr<DataChunk> chunk = unique_ptr<DataChunk>();
 	ErrorData error;
 	while (result->TryFetch(chunk, error) && chunk) {
-		ProcessSelectionvector(chunk, mask);
 	}
 
 	// create selector
-	faiss::IDSelectorBitmap selector = faiss::IDSelectorBitmap(mask.size(), mask.data());
+	faiss::IDSelectorBitmap selector = faiss::IDSelectorBitmap(entry_ptr->mask_tmp.size(), entry_ptr->mask_tmp.data());
 
 	// === normal search ===
 	size_t nQueries = input.size();
@@ -962,6 +1050,15 @@ static void LoadInternal(DatabaseInstance &instance) {
 		CreateScalarFunctionInfo search_info_params(search_function_params);
 		search_info_params.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
 		catalog.CreateFunction(*con.context, search_info_params);
+	}
+
+	{
+		TableFunction add_function("__faiss_create_mask", {LogicalType::TABLE, LogicalType::VARCHAR}, nullptr, AddBind,
+		                           SelGlobalInit, SelLocalInit);
+		add_function.in_out_function = SelFunction;
+		add_function.in_out_function_final = SelFinaliseFunction;
+		CreateTableFunctionInfo add_info(add_function);
+		catalog.CreateTableFunction(*con.context, &add_info);
 	}
 
 	{
