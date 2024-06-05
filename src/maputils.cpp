@@ -1,3 +1,4 @@
+#include "duckdb/common/helper.hpp"
 #include "duckdb/common/string.hpp"
 #include "duckdb/common/types/vector.hpp"
 
@@ -26,6 +27,6 @@ std::tuple<shared_ptr<Vector>, uint64_t> mapFromValue(Value v) {
 	Vector values = Vector(v);
 	values.Reference(v);
 
-	return std::make_tuple(make_shared<Vector>(v), paramList.size());
+	return std::make_tuple(make_shared_ptr<Vector>(v), paramList.size());
 }
 } // namespace duckdb

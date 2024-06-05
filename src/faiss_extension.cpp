@@ -120,7 +120,7 @@ static unique_ptr<FunctionData> CreateBind(ClientContext &, TableFunctionBindInp
 	result->dimension = input.inputs[1].GetValue<int>();
 	result->description = input.inputs[2].ToString();
 	if (input.inputs.size() == 4) {
-		tie(result->indexParams, result->paramCount) = mapFromValue(input.inputs[3]);
+		std::tie(result->indexParams, result->paramCount) = mapFromValue(input.inputs[3]);
 	}
 
 	return std::move(result);
@@ -157,7 +157,7 @@ static void CreateFunction(ClientContext &context, TableFunctionInput &data_p, D
 	faiss::Index *index =
 	    faiss::index_factory(bind_data.dimension, bind_data.description.c_str(), faiss::METRIC_INNER_PRODUCT);
 	index = setIndexParameters(index, bind_data.indexParams.get(), bind_data.paramCount);
-	auto entry = make_shared<IndexEntry>();
+	auto entry = make_shared_ptr<IndexEntry>();
 	entry->index = unique_ptr<faiss::Index>(index);
 	entry->needs_training = !entry->index.get()->is_trained;
 	entry->faiss_lock = unique_ptr<std::mutex>(new std::mutex());
@@ -233,7 +233,7 @@ static void LoadFunction(ClientContext &context, TableFunctionInput &data_p, Dat
 		throw InvalidInputException("Could not find index %s.", bind_data.key);
 	}
 
-	auto entry = make_shared<IndexEntry>();
+	auto entry = make_shared_ptr<IndexEntry>();
 	entry->index = unique_ptr<faiss::Index>(faiss::read_index(bind_data.filename.c_str()));
 	entry->needs_training = !entry->index.get()->is_trained;
 	entry->faiss_lock = unique_ptr<std::mutex>(new std::mutex());
@@ -646,7 +646,7 @@ vector<shared_ptr<faiss::SearchParameters>> innerCreateSearchParameters(faiss::I
 	}
 	faiss::IndexIVF *ivf = dynamic_cast<faiss::IndexIVF *>(index);
 	if (ivf) {
-		shared_ptr<faiss::SearchParametersIVF> searchParams = make_shared<faiss::SearchParametersIVF>();
+		shared_ptr<faiss::SearchParametersIVF> searchParams = make_shared_ptr<faiss::SearchParametersIVF>();
 		searchParams->sel = selector;
 		vector<shared_ptr<faiss::SearchParameters>> ret =
 		    innerCreateSearchParameters(ivf->quantizer, NULL, userParams, paramCount, prefix + "quantiser.");
@@ -662,7 +662,7 @@ vector<shared_ptr<faiss::SearchParameters>> innerCreateSearchParameters(faiss::I
 
 	void *hnsw = dynamic_cast<faiss::IndexHNSW *>(index);
 	if (hnsw) {
-		shared_ptr<faiss::SearchParametersHNSW> searchParams = make_shared<faiss::SearchParametersHNSW>();
+		shared_ptr<faiss::SearchParametersHNSW> searchParams = make_shared_ptr<faiss::SearchParametersHNSW>();
 		searchParams->sel = selector;
 		// stoi can throw, we should catch and rethrow invalid input exception.
 		string efSearch = getUserParamValue(*userParams, paramCount, prefix + "efSearch");
@@ -673,7 +673,7 @@ vector<shared_ptr<faiss::SearchParameters>> innerCreateSearchParameters(faiss::I
 		return vector<shared_ptr<faiss::SearchParameters>>(1, searchParams);
 	}
 
-	shared_ptr<faiss::SearchParameters> searchParams = make_shared<faiss::SearchParameters>();
+	shared_ptr<faiss::SearchParameters> searchParams = make_shared_ptr<faiss::SearchParameters>();
 	searchParams->sel = selector;
 	return vector<shared_ptr<faiss::SearchParameters>>(1, searchParams);
 }
@@ -856,8 +856,6 @@ static OperatorFinalizeResultType SelFinaliseFunction(ExecutionContext &context,
 	return OperatorFinalizeResultType::FINISHED;
 }
 
-// TODO: search could be a table function, which would require more copying but
-// could result in allowing duckdb to "ask for more" if needed
 void SearchFunction(DataChunk &input, ExpressionState &state, Vector &output) {
 	string key = input.data[0].GetValue(0).ToString();
 
@@ -873,7 +871,7 @@ void SearchFunction(DataChunk &input, ExpressionState &state, Vector &output) {
 	shared_ptr<Vector> userParams = nullptr;
 	uint64_t paramCount = 0;
 	if (input.data.size() == 4) {
-		tie(userParams, paramCount) = mapFromValue(input.data[3].GetValue(0));
+		std::tie(userParams, paramCount) = mapFromValue(input.data[3].GetValue(0));
 	}
 
 	vector<shared_ptr<faiss::SearchParameters>> searchParams =
@@ -902,7 +900,7 @@ void SearchFunctionFilter(DataChunk &input, ExpressionState &state, Vector &outp
 	string filterExpression = ss.str();
 
 	shared_ptr<DatabaseInstance> db = state.GetContext().db;
-	shared_ptr<ClientContext> subcommection = make_shared<ClientContext>(db);
+	shared_ptr<ClientContext> subcommection = make_shared_ptr<ClientContext>(db);
 	unique_ptr<QueryResult> result = subcommection->Query(filterExpression, false);
 
 	if (result->HasError()) {
@@ -922,7 +920,7 @@ void SearchFunctionFilter(DataChunk &input, ExpressionState &state, Vector &outp
 	shared_ptr<Vector> userParams = nullptr;
 	uint64_t paramCount = 0;
 	if (input.data.size() == 7) {
-		tie(userParams, paramCount) = mapFromValue(input.data[6].GetValue(0));
+		std::tie(userParams, paramCount) = mapFromValue(input.data[6].GetValue(0));
 	}
 	vector<shared_ptr<faiss::SearchParameters>> searchParams =
 	    createSearchParameters(entry.index.get(), &selector, userParams.get(), paramCount);
@@ -949,7 +947,7 @@ void SearchFunctionFilterSet(DataChunk &input, ExpressionState &state, Vector &o
 	string filterExpression = ss.str();
 
 	shared_ptr<DatabaseInstance> db = state.GetContext().db;
-	shared_ptr<ClientContext> subcommection = make_shared<ClientContext>(db);
+	shared_ptr<ClientContext> subcommection = make_shared_ptr<ClientContext>(db);
 	unique_ptr<QueryResult> result = subcommection->Query(filterExpression, false);
 
 	if (result->HasError()) {
@@ -971,7 +969,7 @@ void SearchFunctionFilterSet(DataChunk &input, ExpressionState &state, Vector &o
 	shared_ptr<Vector> userParams = nullptr;
 	uint64_t paramCount = 0;
 	if (input.data.size() == 7) {
-		tie(userParams, paramCount) = mapFromValue(input.data[6].GetValue(0));
+		std::tie(userParams, paramCount) = mapFromValue(input.data[6].GetValue(0));
 	}
 	vector<shared_ptr<faiss::SearchParameters>> searchParams =
 	    createSearchParameters(entry.index.get(), &selector, userParams.get(), paramCount);
