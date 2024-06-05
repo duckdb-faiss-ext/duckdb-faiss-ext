@@ -1122,6 +1122,10 @@ std::string FaissExtension::Name() {
 	return "faiss";
 }
 
+std::string FaissExtension::Version() const {
+	return "0.9.0";
+}
+
 } // namespace duckdb
 
 extern "C" {
