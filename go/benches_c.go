@@ -66,7 +66,9 @@ void run_post(uint64_t N, uint32_t n, uint32_t p) {
 			duckdb_data_chunk chunk = duckdb_result_get_chunk(result, i);
 			duckdb_destroy_data_chunk(&chunk);
 		}
+		duckdb_destroy_result(&result);
 	}
+	free(query);
 }
 
 void run_sel(uint64_t N, uint32_t p) {
@@ -84,7 +86,9 @@ void run_sel(uint64_t N, uint32_t p) {
 			duckdb_data_chunk chunk = duckdb_result_get_chunk(result, i);
 			duckdb_destroy_data_chunk(&chunk);
 		}
+		duckdb_destroy_result(&result);
 	}
+	free(query);
 }
 
 void run_set(uint64_t N, uint32_t p) {
@@ -102,7 +106,9 @@ void run_set(uint64_t N, uint32_t p) {
 			duckdb_data_chunk chunk = duckdb_result_get_chunk(result, i);
 			duckdb_destroy_data_chunk(&chunk);
 		}
+		duckdb_destroy_result(&result);
 	}
+	free(query);
 }
 
 */
