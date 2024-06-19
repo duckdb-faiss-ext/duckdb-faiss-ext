@@ -15,6 +15,11 @@ func main() {
 		return
 	}
 
+	_, err = db.Exec("LOAD json")
+	if err != nil {
+		panic(err)
+	}
+
 	_, err = db.Exec("CALL FAISS_LOAD('flat', 'conformanceTests/index_IVF2048')")
 	if err != nil {
 		panic(err)

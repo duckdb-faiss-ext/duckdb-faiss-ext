@@ -30,9 +30,14 @@ void init() {
 		printf("unable to create mod table\n");
 	}
 
+	state = duckdb_query(con, "LOAD json;", NULL);
+	if (state == DuckDBError) {
+		printf("unable to load json extension\n");
+	}
+
 	state = duckdb_query(con, "LOAD 'build/reldebug/extension/faiss/faiss.duckdb_extension';", NULL);
 	if (state == DuckDBError) {
-		printf("unable to create mod table\n");
+		printf("unable to load faiss\n");
 	}
 
 	state = duckdb_query(con, "CALL FAISS_LOAD('flat', 'conformanceTests/index_IVF2048');", NULL);
@@ -46,11 +51,11 @@ void init() {
 	}
 }
 
-void run_non(uint64_t N, uint32_t n) {
+void run_post(uint64_t N, uint32_t n, uint32_t p) {
 	duckdb_result result;
 	duckdb_state state;
 	char *query = (char*)malloc(1000 * sizeof(char));
-	sprintf(query, "SELECT qid, UNNEST(faiss_search('flat', %d, embedding)) FROM queries", n);
+	sprintf(query, "SELECT * FROM (SELECT qid, UNNEST(faiss_search('flat', %d, embedding), recursive:=true) FROM queries) JOIN ids ON label=id WHERE sel<%d", n, p);
 	for (int i = 0; i < N; i++) {
 		state = duckdb_query(con, query, &result);
 		if (state == DuckDBError) {
@@ -61,14 +66,16 @@ void run_non(uint64_t N, uint32_t n) {
 			duckdb_data_chunk chunk = duckdb_result_get_chunk(result, i);
 			duckdb_destroy_data_chunk(&chunk);
 		}
+		duckdb_destroy_result(&result);
 	}
+	free(query);
 }
 
 void run_sel(uint64_t N, uint32_t p) {
 	duckdb_result result;
 	duckdb_state state;
 	char *query = (char*)malloc(1000 * sizeof(char));
-	sprintf(query, "SELECT qid, UNNEST(faiss_search_filter('flat', 10, embedding, 'sel<%d', 'rowid', 'ids')) FROM queries", p);
+	sprintf(query, "SELECT * FROM (SELECT qid, UNNEST(faiss_search_filter('flat', 10, embedding, 'sel<%d', 'rowid', 'ids'), recursive:=true) FROM queries) JOIN ids ON label=id", p);
 	for (int i = 0; i < N; i++) {
 		state = duckdb_query(con, query, &result);
 		if (state == DuckDBError) {
@@ -79,14 +86,16 @@ void run_sel(uint64_t N, uint32_t p) {
 			duckdb_data_chunk chunk = duckdb_result_get_chunk(result, i);
 			duckdb_destroy_data_chunk(&chunk);
 		}
+		duckdb_destroy_result(&result);
 	}
+	free(query);
 }
 
 void run_set(uint64_t N, uint32_t p) {
 	duckdb_result result;
 	duckdb_state state;
 	char *query = (char*)malloc(1000 * sizeof(char));
-	sprintf(query, "SELECT qid, UNNEST(faiss_search_filter_set('flat', 10, embedding, 'sel<%d', 'rowid', 'ids')) FROM queries", p);
+	sprintf(query, "SELECT * FROM (SELECT qid, UNNEST(faiss_search_filter_set('flat', 10, embedding, 'sel<%d', 'rowid', 'ids'), recursive:=true) FROM queries) JOIN ids ON label=id", p);
 	for (int i = 0; i < N; i++) {
 		state = duckdb_query(con, query, &result);
 		if (state == DuckDBError) {
@@ -97,7 +106,9 @@ void run_set(uint64_t N, uint32_t p) {
 			duckdb_data_chunk chunk = duckdb_result_get_chunk(result, i);
 			duckdb_destroy_data_chunk(&chunk);
 		}
+		duckdb_destroy_result(&result);
 	}
+	free(query);
 }
 
 */
@@ -107,8 +118,8 @@ func benchinit() {
 	C.init()
 }
 
-func benchrun_non(N uint64, n uint32) {
-	C.run_non(C.uint64_t(N), C.uint32_t(n))
+func benchrun_post(N uint64, n, p uint32) {
+	C.run_post(C.uint64_t(N), C.uint32_t(n), C.uint32_t(p))
 }
 
 func benchrun_sel(N uint64, p uint32) {

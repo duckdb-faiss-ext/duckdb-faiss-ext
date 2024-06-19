@@ -14,5 +14,6 @@ func SetupDatabase() (*sql.DB, error) {
 
 	path := os.Getenv("FAISS_EXTENSION_BINARY_PATH")
 	_, err = db.Exec(fmt.Sprintf("LOAD '%s'", path))
+	_, err = db.Exec(fmt.Sprintf("LOAD json"))
 	return db, err
 }

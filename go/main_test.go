@@ -27,10 +27,10 @@ func BenchmarkAllQueriesIVF2048_10(b *testing.B) {
 			return (1 - binom.CDF(requiredResults)) - targetPass
 		}, 0, 100000)
 
-		b.Run(fmt.Sprintf("%02d%%_nonfilter", p), func(b *testing.B) {
+		b.Run(fmt.Sprintf("%02d%%_filterpost", p), func(b *testing.B) {
 			b.ReportMetric(float64(requiredN), "#queries")
 			runtime.LockOSThread()
-			benchrun_non(uint64(b.N), uint32(requiredN))
+			benchrun_post(uint64(b.N), uint32(requiredN), uint32(p))
 			runtime.UnlockOSThread()
 		})
 		b.Run(fmt.Sprintf("%02d%%_filtersel", p), func(b *testing.B) {

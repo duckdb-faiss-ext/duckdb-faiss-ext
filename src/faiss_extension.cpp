@@ -1,37 +1,31 @@
 #include "faiss_extension.hpp"
 
-#include "duckdb.hpp"
+#include "duckdb/common/error_data.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/helper.hpp"
 #include "duckdb/common/optional_ptr.hpp"
-#include "duckdb/common/preserved_error.hpp"
 #include "duckdb/common/shared_ptr.hpp"
-#include "duckdb/common/string_util.hpp"
+#include "duckdb/common/typedefs.hpp"
 #include "duckdb/common/types.hpp"
 #include "duckdb/common/types/data_chunk.hpp"
-#include "duckdb/common/types/selection_vector.hpp"
 #include "duckdb/common/types/value.hpp"
 #include "duckdb/common/types/vector.hpp"
 #include "duckdb/common/unique_ptr.hpp"
 #include "duckdb/common/vector.hpp"
-#include "duckdb/execution/column_binding_resolver.hpp"
 #include "duckdb/execution/execution_context.hpp"
 #include "duckdb/execution/expression_executor.hpp"
+#include "duckdb/function/function.hpp"
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/function/table_function.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/main/connection.hpp"
 #include "duckdb/main/database.hpp"
 #include "duckdb/main/prepared_statement.hpp"
-#include "duckdb/parallel/interrupt.hpp"
 #include "duckdb/parallel/thread_context.hpp"
 #include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 #include "duckdb/parser/parsed_data/create_table_function_info.hpp"
-#include "duckdb/parser/parser.hpp"
-#include "duckdb/parser/query_node/select_node.hpp"
 #include "duckdb/planner/binder.hpp"
 #include "duckdb/planner/expression.hpp"
-#include "duckdb/planner/logical_operator.hpp"
 #include "duckdb/storage/object_cache.hpp"
 #include "faiss/Index.h"
 #include "faiss/IndexHNSW.h"
@@ -39,17 +33,15 @@
 #include "faiss/IndexIVF.h"
 #include "faiss/MetricType.h"
 #include "faiss/impl/FaissException.h"
+#include "faiss/impl/HNSW.h"
 #include "faiss/impl/IDSelector.h"
 #include "faiss/index_factory.h"
 #include "faiss/index_io.h"
+#include "maputils.hpp"
 
 #include <cstddef>
 #include <cstdint>
-#include <duckdb/common/enum_util.hpp>
-#include <iostream>
 #include <ostream>
-#include <random>
-#include <shared_mutex>
 #include <string>
 #include <vector>
 #define DUCKDB_EXTENSION_MAIN
@@ -63,10 +55,12 @@ enum LABELSTATE {
 };
 
 struct IndexEntry : ObjectCacheEntry {
+	unique_ptr<std::mutex>
+	    faiss_lock; // c++11 doesnt have a shared_mutex, introduced in c++14. duckdb is build with c++11
 	unique_ptr<faiss::Index> index;
 
-	// This is true if the index needs training. In the future,
-	// this can also be false if manual training enabled.
+	// This is true if the index needs training. When adding data
+	// this is used to determine if it should re-train or not.
 	bool needs_training = true;
 	// isMutable reflects whether it is possible to add data to this
 	// index while staying consistent.
@@ -75,12 +69,8 @@ struct IndexEntry : ObjectCacheEntry {
 	// needs training (and thus doesnt have any data yet).needs_training
 	bool isMutable = true;
 
+	// Whether or not custom labels are used for this index.
 	LABELSTATE custom_labels = UNDECIDED;
-
-	int dimension = 0; // This can easily be obtained from the index, doing only a pointer dereference.
-	vector<unique_ptr<float[]>> index_data; // Currently I do not see a use for this
-	unique_ptr<std::mutex>
-	    faiss_lock; // c++11 doesnt have a shared_mutex, introduced in c++14. duckdb is build with c++11
 
 	// This keeps track of how many threads are currently adding, this is to make sure that we
 	// only train/push to faiss when there are no threads adding more data. Does not guarantee
@@ -96,6 +86,11 @@ struct IndexEntry : ObjectCacheEntry {
 	// keeps track of how many vectors have been added
 	size_t added = 0;
 
+	// Lock making sure only one thread uses the mask at a time
+	unique_ptr<std::mutex> mask_lock = unique_ptr<std::mutex>(new std::mutex());
+	// Temporary storage for selection mask
+	vector<uint8_t> mask_tmp;
+
 	static string ObjectType() {
 		return "faiss_index";
 	}
@@ -104,6 +99,8 @@ struct IndexEntry : ObjectCacheEntry {
 		return IndexEntry::ObjectType();
 	}
 };
+
+// Create function
 
 struct CreateFunctionData : public TableFunctionData {
 	string key;
@@ -123,29 +120,10 @@ static unique_ptr<FunctionData> CreateBind(ClientContext &, TableFunctionBindInp
 	result->dimension = input.inputs[1].GetValue<int>();
 	result->description = input.inputs[2].ToString();
 	if (input.inputs.size() == 4) {
-		vector<Value> paramList = ListValue::GetChildren(input.inputs[3]);
-		Vector v = Vector(input.inputs[3].type());
-		v.Reference(input.inputs[3]);
-
-		result->indexParams = make_shared<Vector>(v);
-		result->paramCount = paramList.size();
+		std::tie(result->indexParams, result->paramCount) = mapFromValue(input.inputs[3]);
 	}
 
 	return std::move(result);
-}
-
-string getUserParamValue(Vector &userParams, uint64_t paramCount, string key) {
-	if (paramCount == 0) {
-		return "";
-	}
-	Vector &keys = MapVector::GetKeys(userParams);
-	Vector &values = MapVector::GetValues(userParams);
-	for (uint64_t i = 0; i < paramCount; i++) {
-		if (keys.GetValue(i).GetValue<string>() == key) {
-			return values.GetValue(i).GetValue<string>();
-		}
-	}
-	return "";
 }
 
 faiss::Index *setIndexParameters(faiss::Index *index, Vector *userParams, uint64_t paramCount) {
@@ -179,8 +157,7 @@ static void CreateFunction(ClientContext &context, TableFunctionInput &data_p, D
 	faiss::Index *index =
 	    faiss::index_factory(bind_data.dimension, bind_data.description.c_str(), faiss::METRIC_INNER_PRODUCT);
 	index = setIndexParameters(index, bind_data.indexParams.get(), bind_data.paramCount);
-	auto entry = make_shared<IndexEntry>();
-	entry->dimension = bind_data.dimension;
+	auto entry = make_shared_ptr<IndexEntry>();
 	entry->index = unique_ptr<faiss::Index>(index);
 	entry->needs_training = !entry->index.get()->is_trained;
 	entry->faiss_lock = unique_ptr<std::mutex>(new std::mutex());
@@ -189,6 +166,82 @@ static void CreateFunction(ClientContext &context, TableFunctionInput &data_p, D
 	object_cache.Put(bind_data.key, std::move(entry));
 }
 
+struct SaveFunctionData : public TableFunctionData {
+	string key;
+	string filename;
+};
+
+static unique_ptr<FunctionData> SaveBind(ClientContext &, TableFunctionBindInput &input,
+                                         vector<LogicalType> &return_types, vector<string> &names) {
+	auto result = make_uniq<SaveFunctionData>();
+	return_types.emplace_back(LogicalType::BOOLEAN);
+	names.emplace_back("Success");
+
+	result->key = input.inputs[0].ToString();
+	result->filename = input.inputs[1].ToString();
+
+	return std::move(result);
+}
+
+// Duckdb has a loading and saving mechanism, but this is for tables.
+// Since faiss does not use duckdb tables for data storage we cannot use this integration.
+// It would be nice if there would be a mechanism to associate this with the database, and every
+// save of the database would also include the index. However, this is probably not
+// supported on all export formats, like parquet.
+static void SaveFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &) {
+	SaveFunctionData bind_data = data_p.bind_data->Cast<SaveFunctionData>();
+	auto &object_cache = ObjectCache::GetObjectCache(context);
+
+	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data.key);
+	if (!entry_ptr) {
+		throw InvalidInputException("Could not find index %s.", bind_data.key);
+	}
+
+	auto &entry = *entry_ptr;
+	faiss::Index *index = &*entry.index;
+	faiss::write_index(index, bind_data.filename.c_str());
+}
+
+struct LoadFunctionData : public TableFunctionData {
+	string key;
+	string filename;
+};
+
+static unique_ptr<FunctionData> LoadBind(ClientContext &, TableFunctionBindInput &input,
+                                         vector<LogicalType> &return_types, vector<string> &names) {
+	auto result = make_uniq<LoadFunctionData>();
+	return_types.emplace_back(LogicalType::BOOLEAN);
+	names.emplace_back("Success");
+
+	result->key = input.inputs[0].ToString();
+	result->filename = input.inputs[1].ToString();
+
+	return std::move(result);
+}
+
+// Duckdb has a loading and saving mechanism, but this is for tables.
+// Since faiss does not use duckdb tables for data storage we cannot use this integration.
+// It would be nice if there would be a mechanism to associate this with the database, and every
+// save of the database would also include the index. However, this is probably not
+// supported on all export formats, like parquet.
+static void LoadFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &) {
+	LoadFunctionData bind_data = data_p.bind_data->Cast<LoadFunctionData>();
+	auto &object_cache = ObjectCache::GetObjectCache(context);
+
+	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data.key);
+	if (entry_ptr) {
+		throw InvalidInputException("Could not find index %s.", bind_data.key);
+	}
+
+	auto entry = make_shared_ptr<IndexEntry>();
+	entry->index = unique_ptr<faiss::Index>(faiss::read_index(bind_data.filename.c_str()));
+	entry->needs_training = !entry->index.get()->is_trained;
+	entry->faiss_lock = unique_ptr<std::mutex>(new std::mutex());
+	entry->add_lock = unique_ptr<std::mutex>(new std::mutex());
+	entry->isMutable = entry->needs_training;
+
+	object_cache.Put(bind_data.key, std::move(entry));
+}
 struct DestroyFunctionData : public TableFunctionData {
 	string key;
 };
@@ -244,6 +297,127 @@ static unique_ptr<Vector> ListVectorToFaiss(ClientContext &context, Vector &inpu
 	return cast_result;
 }
 
+// Manual train function
+
+struct MTrainState : public GlobalTableFunctionState {
+	// This keeps track of how many threads are currently adding, this is to make sure that we
+	// only train/push to faiss when there are no threads adding more data. Does not guarantee
+	// that all data has been added, as some threads may just have not been started yet
+	std::atomic_uint64_t currently_adding;
+	unique_ptr<std::mutex> add_lock = unique_ptr<std::mutex>(new std::mutex());
+	// Store chunks for the add function (which can be done in parallel)
+	// to be added all at once at the end
+	vector<float> add_data;
+};
+
+struct MTrainData : TableFunctionData {
+	string key;
+};
+
+static unique_ptr<FunctionData> MTrainBind(ClientContext &, TableFunctionBindInput &input,
+                                           vector<LogicalType> &return_types, vector<string> &names) {
+	auto bind_data = make_uniq<MTrainData>();
+
+	return_types.emplace_back(LogicalType::BOOLEAN);
+	names.emplace_back("Success");
+
+	bind_data->key = input.inputs[1].ToString();
+
+	return bind_data;
+}
+
+static unique_ptr<GlobalTableFunctionState> MTrainGlobalInit(ClientContext &context, TableFunctionInitInput &input) {
+	return make_uniq<MTrainState>();
+}
+
+static unique_ptr<LocalTableFunctionState> MTrainLocalInit(ExecutionContext &context, TableFunctionInitInput &data_p,
+                                                           GlobalTableFunctionState *global_state) {
+	MTrainState &state = global_state->Cast<MTrainState>();
+	state.currently_adding++;
+	return make_uniq<LocalTableFunctionState>();
+}
+
+static OperatorResultType MTrainFunction(ExecutionContext &context, TableFunctionInput &data_p, DataChunk &input,
+                                         DataChunk &) {
+	MTrainState &state = data_p.global_state->Cast<MTrainState>();
+
+	auto bind_data = data_p.bind_data->Cast<MTrainData>();
+	auto &object_cache = ObjectCache::GetObjectCache(context.client);
+	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data.key);
+	if (!entry_ptr) {
+		throw InvalidInputException("Could not find index %s.", bind_data.key);
+	}
+	auto &entry = *entry_ptr;
+
+	if (!entry.isMutable) {
+		throw InvalidInputException(
+		    "Attempted to train to an immutable index. Indexes are marked immutable if they are "
+		    "loaded from disk and don't need training.");
+	}
+
+	auto data_elements = input.size() * entry.index->d;
+
+	auto child_vec = ListVectorToFaiss(context.client, input.data[0], input.size(), entry.index->d);
+	auto child_ptr = FlatVector::GetData<float>(*child_vec);
+
+	state.add_lock.get()->lock();
+	size_t original_data_size = state.add_data.size();
+	state.add_data.resize(original_data_size + data_elements);
+	memcpy(&state.add_data.data()[original_data_size], child_ptr, data_elements * sizeof(float));
+	state.add_lock.get()->unlock();
+
+	return OperatorResultType::NEED_MORE_INPUT;
+}
+
+static OperatorFinalizeResultType MTrainFinaliseFunction(ExecutionContext &context, TableFunctionInput &data_p,
+                                                         DataChunk &) {
+	MTrainState &state = data_p.global_state->Cast<MTrainState>();
+
+	auto bind_data = data_p.bind_data->Cast<MTrainData>();
+	auto &object_cache = ObjectCache::GetObjectCache(context.client);
+	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data.key);
+	if (!entry_ptr) {
+		throw InvalidInputException("Could not find index %s.", bind_data.key);
+	}
+
+	auto &entry = *entry_ptr;
+
+	state.add_lock.get()->lock();
+	state.currently_adding--;
+	if (state.currently_adding != 0) {
+		state.add_lock.get()->unlock();
+		return OperatorFinalizeResultType::FINISHED;
+	}
+	state.add_lock.get()->unlock();
+
+	if (state.add_data.size() == 0) {
+		return OperatorFinalizeResultType::FINISHED;
+	}
+
+	entry.faiss_lock.get()->lock();
+	try {
+		entry.index->train((faiss::idx_t)state.add_data.size() / entry.index->d, &state.add_data[0]);
+	} catch (faiss::FaissException exception) {
+		std::string msg = exception.msg;
+		if (msg.find("should be at least as large as number of clusters") != std::string::npos) {
+			throw InvalidInputException(
+			    "Index needs to be trained, but amount of datapoints is too small. Considere adding more data. (" +
+			        msg + ")",
+			    bind_data.key);
+		} else {
+			throw InvalidInputException("Error occured while training index: %s", msg);
+		}
+	}
+
+	entry.faiss_lock.get()->unlock();
+	// Future calls to add to the index won't train the index anymore.
+	// They wil directly add to the index.
+	entry.needs_training = false;
+	return OperatorFinalizeResultType::FINISHED;
+}
+
+// Adding function
+
 struct AddData : TableFunctionData {
 	string key;
 };
@@ -272,11 +446,11 @@ static unique_ptr<FunctionData> AddBind(ClientContext &context, TableFunctionBin
 		if (input.input_table_names.size() == 2 && entry_ptr.get()->custom_labels == FALSE) {
 			throw InvalidInputException(
 			    "Tried to insert data with labels, when index was previously added without labels. "
-			    "Cannot mix data with and without labels");
+			    "Cannot mix index data with and without labels");
 		} else if (input.input_table_names.size() == 1 && entry_ptr.get()->custom_labels == TRUE) {
 			throw InvalidInputException(
 			    "Tried to insert data without labels, when index was previously added with labels. "
-			    "Cannot mix data with and without labels");
+			    "Cannot mix index data with and without labels");
 		}
 	}
 
@@ -315,16 +489,16 @@ static OperatorResultType AddFunction(ExecutionContext &context, TableFunctionIn
 		                            "loaded from disk and don't need training.");
 	}
 
-	auto data_elements = input.size() * entry.dimension;
+	auto data_elements = input.size() * entry.index->d;
 	idx_t vector_count = input.size();
 
 	auto child_vec = ListVectorToFaiss(context.client, entry.custom_labels == TRUE ? input.data[1] : input.data[0],
-	                                   input.size(), entry.dimension);
+	                                   input.size(), entry.index->d);
 	auto child_ptr = FlatVector::GetData<float>(*child_vec);
 
+	Vector label_cast_vec(LogicalType::BIGINT);
 	faiss::idx_t *label_ptr;
 	if (entry.custom_labels == TRUE) {
-		Vector label_cast_vec(LogicalType::BIGINT);
 		VectorOperations::Cast(context.client, input.data[0], label_cast_vec, input.size());
 		label_ptr = FlatVector::GetData<faiss::idx_t>(label_cast_vec);
 	}
@@ -401,7 +575,7 @@ static OperatorFinalizeResultType AddFinaliseFunction(ExecutionContext &context,
 		std::string msg = exception.msg;
 		if (msg.find("should be at least as large as number of clusters") != std::string::npos) {
 			throw InvalidInputException(
-			    "Index needs to be trained, but amount of datapoints is too small. Considere adding more data. (" +
+			    "Index %s needs to be trained, but amount of datapoints is too small. Considere adding more data. (" +
 			        msg + ")",
 			    bind_data.key);
 		} else {
@@ -411,7 +585,7 @@ static OperatorFinalizeResultType AddFinaliseFunction(ExecutionContext &context,
 
 	// We only add data that havn't been added yet, so we skip the data already added
 	faiss::idx_t new_element_count = total_elements - added_elements;
-	float *new_vector_data = &entry.add_data[added_elements * entry.dimension];
+	float *new_vector_data = &entry.add_data[added_elements * entry.index->d];
 	faiss::idx_t *new_label_data = &entry.add_labels[added_elements];
 	if (entry.custom_labels == TRUE) {
 		entry.index->add_with_ids(new_element_count, new_vector_data, new_label_data);
@@ -423,128 +597,13 @@ static OperatorFinalizeResultType AddFinaliseFunction(ExecutionContext &context,
 	return OperatorFinalizeResultType::FINISHED;
 }
 
-struct MTrainData : TableFunctionData {
-	string key;
-};
-
-static unique_ptr<FunctionData> MTrainBind(ClientContext &, TableFunctionBindInput &input,
-                                           vector<LogicalType> &return_types, vector<string> &names) {
-	auto bind_data = make_uniq<MTrainData>();
-
-	return_types.emplace_back(LogicalType::BOOLEAN);
-	names.emplace_back("Success");
-
-	bind_data->key = input.inputs[1].ToString();
-
-	return bind_data;
-}
-
-struct MTrainState : public GlobalTableFunctionState {
-	// This keeps track of how many threads are currently adding, this is to make sure that we
-	// only train/push to faiss when there are no threads adding more data. Does not guarantee
-	// that all data has been added, as some threads may just have not been started yet
-	std::atomic_uint64_t currently_adding;
-	unique_ptr<std::mutex> add_lock = unique_ptr<std::mutex>(new std::mutex());
-	// Store chunks for the add function (which can be done in parallel)
-	// to be added all at once at the end
-	vector<float> add_data;
-};
-
-static unique_ptr<GlobalTableFunctionState> MTrainGlobalInit(ClientContext &context, TableFunctionInitInput &input) {
-	return make_uniq<MTrainState>();
-}
-
-static unique_ptr<LocalTableFunctionState> MTrainLocalInit(ExecutionContext &context, TableFunctionInitInput &data_p,
-                                                           GlobalTableFunctionState *global_state) {
-	MTrainState &state = global_state->Cast<MTrainState>();
-	state.currently_adding++;
-	return make_uniq<LocalTableFunctionState>();
-}
-
-static OperatorResultType MTrainFunction(ExecutionContext &context, TableFunctionInput &data_p, DataChunk &input,
-                                         DataChunk &) {
-	MTrainState &state = data_p.global_state->Cast<MTrainState>();
-
-	auto bind_data = data_p.bind_data->Cast<MTrainData>();
-	auto &object_cache = ObjectCache::GetObjectCache(context.client);
-	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data.key);
-	if (!entry_ptr) {
-		throw InvalidInputException("Could not find index %s.", bind_data.key);
-	}
-	auto &entry = *entry_ptr;
-
-	if (!entry.isMutable) {
-		throw InvalidInputException(
-		    "Attempted to train to an immutable index. Indexes are marked immutable if they are "
-		    "loaded from disk and don't need training.");
-	}
-
-	auto data_elements = input.size() * entry.dimension;
-
-	auto child_vec = ListVectorToFaiss(context.client, input.data[0], input.size(), entry.dimension);
-	auto child_ptr = FlatVector::GetData<float>(*child_vec);
-
-	state.add_lock.get()->lock();
-	size_t original_data_size = state.add_data.size();
-	state.add_data.resize(original_data_size + data_elements);
-	memcpy(&state.add_data.data()[original_data_size], child_ptr, data_elements * sizeof(float));
-	state.add_lock.get()->unlock();
-
-	return OperatorResultType::NEED_MORE_INPUT;
-}
-
-static OperatorFinalizeResultType MTrainFinaliseFunction(ExecutionContext &context, TableFunctionInput &data_p,
-                                                         DataChunk &) {
-	MTrainState &state = data_p.global_state->Cast<MTrainState>();
-
-	auto bind_data = data_p.bind_data->Cast<MTrainData>();
-	auto &object_cache = ObjectCache::GetObjectCache(context.client);
-	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data.key);
-	if (!entry_ptr) {
-		throw InvalidInputException("Could not find index %s.", bind_data.key);
-	}
-
-	auto &entry = *entry_ptr;
-
-	state.add_lock.get()->lock();
-	state.currently_adding--;
-	if (state.currently_adding != 0) {
-		state.add_lock.get()->unlock();
-		return OperatorFinalizeResultType::FINISHED;
-	}
-	state.add_lock.get()->unlock();
-
-	if (state.add_data.size() == 0) {
-		return OperatorFinalizeResultType::FINISHED;
-	}
-
-	entry.faiss_lock.get()->lock();
-	try {
-		entry.index->train((faiss::idx_t)state.add_data.size() / entry.dimension, &state.add_data[0]);
-	} catch (faiss::FaissException exception) {
-		std::string msg = exception.msg;
-		if (msg.find("should be at least as large as number of clusters") != std::string::npos) {
-			throw InvalidInputException(
-			    "Index needs to be trained, but amount of datapoints is too small. Considere adding more data. (" +
-			        msg + ")",
-			    bind_data.key);
-		} else {
-			throw InvalidInputException("Error occured while training index: %s", msg);
-		}
-	}
-
-	entry.faiss_lock.get()->unlock();
-	// Future calls adding data to the index won't train the index anymore.
-	// They wil directly add to the index.
-	entry.needs_training = false;
-	return OperatorFinalizeResultType::FINISHED;
-}
+// Search functions and helpers
 
 // Searches the faiss index contained in the IndexEntry using the given queries and inputdata and search params. The
 // results are stored in the outputvector as a struct-type of the form {rank, id, distance}.
 void searchIntoVector(ClientContext &ctx, IndexEntry &entry, Vector inputdata, size_t nQueries, size_t nResults,
                       faiss::SearchParameters *searchParams, Vector &output) {
-	unique_ptr<Vector> child_vec = ListVectorToFaiss(ctx, inputdata, nQueries, entry.dimension);
+	unique_ptr<Vector> child_vec = ListVectorToFaiss(ctx, inputdata, nQueries, entry.index->d);
 	auto child_ptr = FlatVector::GetData<float>(*child_vec);
 
 	unique_ptr<faiss::idx_t[]> labels = unique_ptr<faiss::idx_t[]>(new faiss::idx_t[nQueries * nResults]);
@@ -578,53 +637,225 @@ void searchIntoVector(ClientContext &ctx, IndexEntry &entry, Vector inputdata, s
 	}
 }
 
-unique_ptr<faiss::SearchParameters> innerCreateSearchParameters(faiss::Index *index, faiss::IDSelector *selector,
-                                                                Vector *userParams, uint64_t paramCount,
-                                                                string prefix) {
+vector<shared_ptr<faiss::SearchParameters>> innerCreateSearchParameters(faiss::Index *index,
+                                                                        faiss::IDSelector *selector, Vector *userParams,
+                                                                        uint64_t paramCount, string prefix) {
 	faiss::IndexIDMap *idmap = dynamic_cast<faiss::IndexIDMap *>(index);
 	if (idmap) {
 		return innerCreateSearchParameters(idmap->index, selector, userParams, paramCount, prefix);
 	}
 	faiss::IndexIVF *ivf = dynamic_cast<faiss::IndexIVF *>(index);
 	if (ivf) {
-		unique_ptr<faiss::SearchParametersIVF> searchParams = make_uniq<faiss::SearchParametersIVF>();
+		shared_ptr<faiss::SearchParametersIVF> searchParams = make_shared_ptr<faiss::SearchParametersIVF>();
 		searchParams->sel = selector;
-
-		searchParams->quantizer_params =
-		    innerCreateSearchParameters(ivf->quantizer, selector, userParams, paramCount, prefix + "ivf.").get();
-
+		vector<shared_ptr<faiss::SearchParameters>> ret =
+		    innerCreateSearchParameters(ivf->quantizer, NULL, userParams, paramCount, prefix + "quantiser.");
+		searchParams->quantizer_params = ret[0].get();
 		// stoi can throw, we should catch and rethrow invalid input exception.
-		string nprobe = getUserParamValue(*userParams, paramCount, "nprobe");
+		string nprobe = getUserParamValue(*userParams, paramCount, prefix + "nprobe");
 		if (nprobe != "") {
 			searchParams->nprobe = std::stoi(nprobe);
 		}
-		return searchParams;
+		ret.insert(ret.begin(), searchParams);
+		return ret;
 	}
 
 	void *hnsw = dynamic_cast<faiss::IndexHNSW *>(index);
 	if (hnsw) {
-		unique_ptr<faiss::SearchParametersHNSW> searchParams = make_uniq<faiss::SearchParametersHNSW>();
+		shared_ptr<faiss::SearchParametersHNSW> searchParams = make_shared_ptr<faiss::SearchParametersHNSW>();
 		searchParams->sel = selector;
 		// stoi can throw, we should catch and rethrow invalid input exception.
-		string efSearch = getUserParamValue(*userParams, paramCount, "efSearch");
+		string efSearch = getUserParamValue(*userParams, paramCount, prefix + "efSearch");
 		if (efSearch != "") {
 			searchParams->efSearch = std::stoi(efSearch);
 		}
-		return searchParams;
+
+		return vector<shared_ptr<faiss::SearchParameters>>(1, searchParams);
 	}
 
-	unique_ptr<faiss::SearchParameters> searchParams = make_uniq<faiss::SearchParameters>();
+	shared_ptr<faiss::SearchParameters> searchParams = make_shared_ptr<faiss::SearchParameters>();
 	searchParams->sel = selector;
-	return searchParams;
+	return vector<shared_ptr<faiss::SearchParameters>>(1, searchParams);
 }
 
-unique_ptr<faiss::SearchParameters> createSearchParameters(faiss::Index *index, faiss::IDSelector *selector,
-                                                           Vector *userParams, uint64_t paramCount) {
-	return createSearchParameters(index, selector, userParams, paramCount, "");
+// The return type is a vector to make sure that the sub-search parameters are kept alive
+vector<shared_ptr<faiss::SearchParameters>> createSearchParameters(faiss::Index *index, faiss::IDSelector *selector,
+                                                                   Vector *userParams, uint64_t paramCount) {
+	return innerCreateSearchParameters(index, selector, userParams, paramCount, "");
 }
 
-// TODO: search could be a table function, which would require more copying but
-// could result in allowing duckdb to "ask for more" if needed
+void ProcessSelectionvector(unique_ptr<DataChunk> &chunk, std::vector<uint8_t> &output) {
+	idx_t size = chunk->size();
+	if (size == 0) {
+		return;
+	}
+	Vector data = chunk->data[0];
+	Vector ids = chunk->data[1];
+	uint8_t *__restrict__ dataBytes = data.GetData();
+
+	bool sequential;
+	uint64_t start;
+	uint64_t max;
+	switch (ids.GetVectorType()) {
+	case VectorType::SEQUENCE_VECTOR: {
+		int64_t sstart, increment, sequence_count;
+		SequenceVector::GetSequence(ids, sstart, increment, sequence_count);
+		start = sstart;
+		max = start + increment * sequence_count;
+		sequential = increment == 1 && start >= 0;
+		break;
+	}
+	default:
+		ids.Flatten(size); // TODO: we can do without the flatten!
+		uint64_t *__restrict__ idBytes = (uint64_t *)ids.GetData();
+
+		uint64_t previous = idBytes[0] - 1;
+		sequential = true;
+		start = idBytes[0];
+		max = 0;
+		for (int i = 0; i < size; i++) {
+			max = MaxValue(max, idBytes[i]);
+			sequential &= idBytes[i] == previous + 1;
+			previous = idBytes[i];
+		}
+	}
+
+	if (output.size() <= max / 8) {
+		output.resize(max / 8 + 1);
+	}
+
+	// If the input is not sequential or alligned, use the slow path
+	if (!sequential) {
+		uint64_t *__restrict__ idBytes = (uint64_t *)ids.GetData();
+		for (int i = 0; i < size; i++) {
+			uint64_t id = idBytes[i];
+			int arrIndex = id / 8;
+			int u8Index = id % 8;
+
+			output[arrIndex] = output[arrIndex] | (dataBytes[i] << u8Index);
+		}
+	} else {
+		int i = 0;
+		int id = start;
+		for (; id % 8 != 0;) {
+			output[id / 8] = output[id / 8] | (dataBytes[i] << (id % 8));
+			i++;
+			id++;
+		}
+		int arrIndex = id / 8;
+		for (; i < size - 8;) {
+			output[arrIndex] = (dataBytes[i + 0] << 0) | (dataBytes[i + 1] << 1) | (dataBytes[i + 2] << 2) |
+			                   (dataBytes[i + 3] << 3) | (dataBytes[i + 4] << 4) | (dataBytes[i + 5] << 5) |
+			                   (dataBytes[i + 6] << 6) | (dataBytes[i + 7] << 7);
+			i += 8;
+			arrIndex += 1;
+		}
+		id = arrIndex * 8;
+		for (; i < size;) {
+			output[arrIndex] = output[arrIndex] | (dataBytes[i] << (id % 8));
+			i++;
+			id++;
+		}
+	}
+}
+
+void ProcessIncludeSet(unique_ptr<DataChunk> &chunk, std::vector<faiss::idx_t> &output) {
+	Vector ids = chunk->data[0];
+	uint64_t *__restrict__ idBytes = (uint64_t *)ids.GetData();
+
+	idx_t target = output.size();
+	output.resize(output.size() + chunk->size());
+	if (sizeof(faiss::idx_t) == sizeof(uint64_t)) {
+		memcpy(&output[target], idBytes, chunk->size() * sizeof(faiss::idx_t));
+	} else {
+		idx_t size = chunk->size();
+		for (idx_t i = 0; i < size; i++) {
+			output[target + i] = idBytes[i];
+		}
+	}
+}
+
+struct SelState : public GlobalTableFunctionState {
+	// This keeps track of how many threads are currently adding, this is to make sure that we
+	// only train/push to faiss when there are no threads adding more data. Does not guarantee
+	// that all data has been added, as some threads may just have not been started yet
+	std::atomic_uint64_t currently_adding;
+	unique_ptr<std::mutex> lock = unique_ptr<std::mutex>(new std::mutex());
+	vector<uint8_t> mask;
+	unique_ptr<DataChunk> chunk;
+};
+
+struct SelData : public TableFunctionData {
+	string key;
+};
+
+static unique_ptr<TableFunctionData> SelBind(ClientContext &context, TableFunctionBindInput &input,
+                                             vector<LogicalType> &return_types, vector<string> &names) {
+	auto bind_data = make_uniq<SelData>();
+
+	return_types.emplace_back(LogicalType::BOOLEAN);
+	names.emplace_back("Success");
+
+	bind_data->key = input.inputs[2].ToString();
+
+	auto &object_cache = ObjectCache::GetObjectCache(context);
+	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data->key);
+	if (!entry_ptr) {
+		throw InvalidInputException("Could not find index %s.", bind_data->key);
+	}
+
+	return bind_data;
+}
+
+static unique_ptr<GlobalTableFunctionState> SelGlobalInit(ClientContext &context, TableFunctionInitInput &input) {
+	unique_ptr<SelState> state = make_uniq<SelState>();
+	state->chunk = make_uniq<DataChunk>();
+	state->chunk->Initialize(context, vector<LogicalType> {LogicalType::UTINYINT, LogicalType::BIGINT});
+
+	return state;
+}
+
+static unique_ptr<LocalTableFunctionState> SelLocalInit(ExecutionContext &context, TableFunctionInitInput &data_p,
+                                                        GlobalTableFunctionState *global_state) {
+	SelState &state = global_state->Cast<SelState>();
+	state.currently_adding++;
+	state.lock->lock();
+
+	return make_uniq<LocalTableFunctionState>();
+}
+
+static OperatorResultType SelFunction(ExecutionContext &context, TableFunctionInput &data_p, DataChunk &input,
+                                      DataChunk &) {
+	SelState *state = (SelState *)data_p.global_state.get();
+	unique_ptr<DataChunk> chunk = make_uniq<DataChunk>();
+	state->chunk->ReferenceColumns(input, vector<column_t> {0, 1});
+	ProcessSelectionvector(state->chunk, state->mask);
+
+	return OperatorResultType::NEED_MORE_INPUT;
+}
+
+static OperatorFinalizeResultType SelFinaliseFunction(ExecutionContext &context, TableFunctionInput &data_p,
+                                                      DataChunk &) {
+	SelState &state = data_p.global_state->Cast<SelState>();
+
+	auto bind_data = data_p.bind_data->Cast<AddData>();
+	auto &object_cache = ObjectCache::GetObjectCache(context.client);
+	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data.key);
+	if (!entry_ptr) {
+		throw InvalidInputException("Could not find index %s.", bind_data.key);
+	}
+
+	state.currently_adding--;
+	if (state.currently_adding != 0) {
+		state.lock.get()->unlock();
+		return OperatorFinalizeResultType::FINISHED;
+	}
+
+	entry_ptr->mask_tmp = state.mask;
+	state.lock->unlock();
+	return OperatorFinalizeResultType::FINISHED;
+}
+
 void SearchFunction(DataChunk &input, ExpressionState &state, Vector &output) {
 	string key = input.data[0].GetValue(0).ToString();
 
@@ -637,63 +868,16 @@ void SearchFunction(DataChunk &input, ExpressionState &state, Vector &output) {
 	input.data[2].Flatten(input.size());
 	size_t nQueries = FlatVector::Validity(input.data[2]).CountValid(input.size());
 	size_t nResults = input.data[1].GetValue(0).GetValue<int32_t>();
-	Vector *userParams = nullptr;
+	shared_ptr<Vector> userParams = nullptr;
 	uint64_t paramCount = 0;
 	if (input.data.size() == 4) {
-		input.data[3].Flatten(input.size());
-		userParams = &input.data[3];
-		paramCount = FlatVector::Validity(input.data[2]).CountValid(input.size());
+		std::tie(userParams, paramCount) = mapFromValue(input.data[3].GetValue(0));
 	}
 
-	unique_ptr<faiss::SearchParameters> searchParams =
-	    createSearchParameters(entry_ptr->index.get(), NULL, userParams, paramCount);
+	vector<shared_ptr<faiss::SearchParameters>> searchParams =
+	    createSearchParameters(entry_ptr->index.get(), NULL, userParams.get(), paramCount);
 
-	searchIntoVector(state.GetContext(), *entry_ptr, input.data[2], nQueries, nResults, searchParams.get(), output);
-}
-
-// TODO: ensure that the input vectors are ordered in the query itself??
-void ProcessSelectionvector(unique_ptr<DataChunk> &chunk, std::vector<uint8_t> &output) {
-	Vector data = chunk->data[0];
-	Vector ids = chunk->data[1];
-	uint8_t *__restrict__ dataBytes = data.GetData();
-	uint64_t *__restrict__ idBytes = (uint64_t *)ids.GetData();
-	idx_t size = chunk->size();
-	if (size == 0) {
-		return;
-	}
-
-	uint64_t max = 0;
-	bool sequential = true;
-	uint64_t previous = idBytes[0] - 1;
-	for (int i = 0; i < size; i++) {
-		max = MaxValue(max, idBytes[i]);
-		sequential &= idBytes[i] == previous + 1;
-		previous = idBytes[i];
-	}
-	if (output.size() <= max / 8) {
-		output.resize(max / 8 + 1);
-	}
-
-	// TODO: remove requirements that the input should be alligned
-	if (!sequential || idBytes[0] % 8 != 0 || size % 8 != 0) {
-		for (int i = 0; i < size; i++) {
-			uint64_t id = idBytes[i];
-			int arrIndex = id / 8;
-			int u8Index = id % 8;
-
-			output[arrIndex] = output[arrIndex] | (dataBytes[i] << u8Index);
-		}
-	} else {
-		int i = 0;
-		int arrIndex = idBytes[0] / 8;
-		for (; i < size - 8;) {
-			output[arrIndex] = (dataBytes[i + 0] << 0) | (dataBytes[i + 1] << 1) | (dataBytes[i + 2] << 2) |
-			                   (dataBytes[i + 3] << 3) | (dataBytes[i + 4] << 4) | (dataBytes[i + 5] << 5) |
-			                   (dataBytes[i + 6] << 6) | (dataBytes[i + 7] << 7);
-			i += 8;
-			arrIndex += 1;
-		}
-	}
+	searchIntoVector(state.GetContext(), *entry_ptr, input.data[2], nQueries, nResults, searchParams[0].get(), output);
 }
 
 void SearchFunctionFilter(DataChunk &input, ExpressionState &state, Vector &output) {
@@ -709,46 +893,38 @@ void SearchFunctionFilter(DataChunk &input, ExpressionState &state, Vector &outp
 	// Once possible use prepared statements, currently not possible to use variables for tables (SELECT *
 	// FROM $1 doesnt parse) use std::format in c++20, this is really ugly
 	std::stringstream ss;
-	// Unlike the normal nomenclature, (u)int1 means int of 1 byte, and (u)int8 means 8 bytes.
-	ss << "SELECT CAST(" << input.data[3].GetValue(0).GetValue<string>() << " AS UTINYINT), CAST("
-	   << input.data[4].GetValue(0).GetValue<string>() << " AS BIGINT) from "
-	   << input.data[5].GetValue(0).GetValue<string>();
+	ss << "CALL __faiss_create_mask((SELECT CAST(" << input.data[3].GetValue(0).GetValue<string>()
+	   << " AS UTINYINT), CAST(" << input.data[4].GetValue(0).GetValue<string>() << " AS BIGINT) from "
+	   << input.data[5].GetValue(0).GetValue<string>() << "), " << key << ") ";
 
 	string filterExpression = ss.str();
 
 	shared_ptr<DatabaseInstance> db = state.GetContext().db;
-	shared_ptr<ClientContext> subcommection = make_shared<ClientContext>(db);
-	unique_ptr<QueryResult> result = subcommection->Query(filterExpression, true);
+	shared_ptr<ClientContext> subcommection = make_shared_ptr<ClientContext>(db);
+	unique_ptr<QueryResult> result = subcommection->Query(filterExpression, false);
 
 	if (result->HasError()) {
 		throw InvalidInputException("uable to execute filter query: %s", result->GetError());
 	}
-	vector<uint8_t> mask = vector<uint8_t>();
 	unique_ptr<DataChunk> chunk = unique_ptr<DataChunk>();
-	PreservedError error;
+	ErrorData error;
 	while (result->TryFetch(chunk, error) && chunk) {
-		ProcessSelectionvector(chunk, mask);
 	}
 
 	// create selector
-	faiss::IDSelectorBitmap selector = faiss::IDSelectorBitmap(mask.size(), mask.data());
-	unique_ptr<faiss::SearchParameters> searchParams = createSearchParameters(entry.index.get(), &selector, NULL, 0);
+	faiss::IDSelectorBitmap selector = faiss::IDSelectorBitmap(entry_ptr->mask_tmp.size(), entry_ptr->mask_tmp.data());
 
 	// === normal search ===
 	size_t nQueries = input.size();
 	size_t nResults = input.data[1].GetValue(0).GetValue<int32_t>();
-
-	searchIntoVector(state.GetContext(), entry, input.data[2], nQueries, nResults, searchParams.get(), output);
-}
-
-// TODO: ensure that the input vectors are ordered in the query itself??
-void ProcessIncludeSet(unique_ptr<DataChunk> &chunk, std::vector<faiss::idx_t> &output) {
-	Vector ids = chunk->data[0];
-	uint64_t *__restrict__ idBytes = (uint64_t *)ids.GetData();
-
-	idx_t target = output.size();
-	output.resize(output.size() + chunk->size());
-	memcpy(&output[target], idBytes, chunk->size() * sizeof(faiss::idx_t));
+	shared_ptr<Vector> userParams = nullptr;
+	uint64_t paramCount = 0;
+	if (input.data.size() == 7) {
+		std::tie(userParams, paramCount) = mapFromValue(input.data[6].GetValue(0));
+	}
+	vector<shared_ptr<faiss::SearchParameters>> searchParams =
+	    createSearchParameters(entry.index.get(), &selector, userParams.get(), paramCount);
+	searchIntoVector(state.GetContext(), entry, input.data[2], nQueries, nResults, searchParams[0].get(), output);
 }
 
 void SearchFunctionFilterSet(DataChunk &input, ExpressionState &state, Vector &output) {
@@ -771,111 +947,37 @@ void SearchFunctionFilterSet(DataChunk &input, ExpressionState &state, Vector &o
 	string filterExpression = ss.str();
 
 	shared_ptr<DatabaseInstance> db = state.GetContext().db;
-	shared_ptr<ClientContext> subcommection = make_shared<ClientContext>(db);
-	unique_ptr<QueryResult> result = subcommection->Query(filterExpression, true);
+	shared_ptr<ClientContext> subcommection = make_shared_ptr<ClientContext>(db);
+	unique_ptr<QueryResult> result = subcommection->Query(filterExpression, false);
 
 	if (result->HasError()) {
 		throw InvalidInputException("uable to execute filter query: %s", result->GetError());
 	}
 	vector<faiss::idx_t> mask = vector<faiss::idx_t>();
 	unique_ptr<DataChunk> chunk = unique_ptr<DataChunk>();
-	PreservedError error;
+	ErrorData error;
 	while (result->TryFetch(chunk, error) && chunk) {
 		ProcessIncludeSet(chunk, mask);
-		// ProcessSelectionvector(chunk, mask);
 	}
 
 	// create selector
 	faiss::IDSelectorBatch selector = faiss::IDSelectorBatch(mask.size(), mask.data());
-	unique_ptr<faiss::SearchParameters> searchParams = createSearchParameters(entry.index.get(), &selector, NULL, 0);
 
 	// === normal search ===
 	size_t nQueries = input.size();
 	size_t nResults = input.data[1].GetValue(0).GetValue<int32_t>();
-
-	searchIntoVector(state.GetContext(), entry, input.data[2], nQueries, nResults, searchParams.get(), output);
-}
-
-// IO functions
-
-struct SaveFunctionData : public TableFunctionData {
-	string key;
-	string filename;
-};
-
-static unique_ptr<FunctionData> SaveBind(ClientContext &, TableFunctionBindInput &input,
-                                         vector<LogicalType> &return_types, vector<string> &names) {
-	auto result = make_uniq<SaveFunctionData>();
-	return_types.emplace_back(LogicalType::BOOLEAN);
-	names.emplace_back("Success");
-
-	result->key = input.inputs[0].ToString();
-	result->filename = input.inputs[1].ToString();
-
-	return std::move(result);
-}
-
-// Duckdb has a loading and saving mechanism, but this is for tables.
-// Since faiss does not use duckdb tables for data storage we cannot use this integration.
-// It would be nice if there would be a mechanism to associate this with the database, and every
-// save of the database would also include the index. However, this is probably not
-// supported on all export formats, like parquet.
-static void SaveFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &) {
-	SaveFunctionData bind_data = data_p.bind_data->Cast<SaveFunctionData>();
-	auto &object_cache = ObjectCache::GetObjectCache(context);
-
-	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data.key);
-	if (!entry_ptr) {
-		throw InvalidInputException("Could not find index %s.", bind_data.key);
+	shared_ptr<Vector> userParams = nullptr;
+	uint64_t paramCount = 0;
+	if (input.data.size() == 7) {
+		std::tie(userParams, paramCount) = mapFromValue(input.data[6].GetValue(0));
 	}
+	vector<shared_ptr<faiss::SearchParameters>> searchParams =
+	    createSearchParameters(entry.index.get(), &selector, userParams.get(), paramCount);
 
-	auto &entry = *entry_ptr;
-	faiss::Index *index = &*entry.index;
-	faiss::write_index(index, bind_data.filename.c_str());
+	searchIntoVector(state.GetContext(), entry, input.data[2], nQueries, nResults, searchParams[0].get(), output);
 }
 
-struct LoadFunctionData : public TableFunctionData {
-	string key;
-	string filename;
-};
-
-static unique_ptr<FunctionData> LoadBind(ClientContext &, TableFunctionBindInput &input,
-                                         vector<LogicalType> &return_types, vector<string> &names) {
-	auto result = make_uniq<LoadFunctionData>();
-	return_types.emplace_back(LogicalType::BOOLEAN);
-	names.emplace_back("Success");
-
-	result->key = input.inputs[0].ToString();
-	result->filename = input.inputs[1].ToString();
-
-	return std::move(result);
-}
-
-// Duckdb has a loading and saving mechanism, but this is for tables.
-// Since faiss does not use duckdb tables for data storage we cannot use this integration.
-// It would be nice if there would be a mechanism to associate this with the database, and every
-// save of the database would also include the index. However, this is probably not
-// supported on all export formats, like parquet.
-static void LoadFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &) {
-	LoadFunctionData bind_data = data_p.bind_data->Cast<LoadFunctionData>();
-	auto &object_cache = ObjectCache::GetObjectCache(context);
-
-	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data.key);
-	if (entry_ptr) {
-		throw InvalidInputException("Could not find index %s.", bind_data.key);
-	}
-
-	auto entry = make_shared<IndexEntry>();
-	entry->index = unique_ptr<faiss::Index>(faiss::read_index(bind_data.filename.c_str()));
-	entry->dimension = entry->index->d;
-	entry->needs_training = !entry->index.get()->is_trained;
-	entry->faiss_lock = unique_ptr<std::mutex>(new std::mutex());
-	entry->add_lock = unique_ptr<std::mutex>(new std::mutex());
-	entry->isMutable = entry->needs_training;
-
-	object_cache.Put(bind_data.key, std::move(entry));
-}
-
+// LoadInternal adds the faiss functions to the database
 static void LoadInternal(DatabaseInstance &instance) {
 	Connection con(instance);
 	con.BeginTransaction();
@@ -898,97 +1000,6 @@ static void LoadInternal(DatabaseInstance &instance) {
 	}
 
 	{
-		TableFunction add_function("faiss_add", {LogicalType::TABLE, LogicalType::VARCHAR}, nullptr, AddBind,
-		                           AddGlobalInit, AddLocalInit);
-		add_function.in_out_function = AddFunction;
-		add_function.in_out_function_final = AddFinaliseFunction;
-		CreateTableFunctionInfo add_info(add_function);
-		catalog.CreateTableFunction(*con.context, &add_info);
-	}
-
-	{
-		TableFunction add_function(
-		    "faiss_add_params",
-		    {LogicalType::TABLE, LogicalType::VARCHAR, LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR)},
-		    nullptr, AddBind, AddGlobalInit, AddLocalInit);
-		add_function.in_out_function = AddFunction;
-		add_function.in_out_function_final = AddFinaliseFunction;
-		CreateTableFunctionInfo add_info(add_function);
-		catalog.CreateTableFunction(*con.context, &add_info);
-	}
-
-	{
-		child_list_t<LogicalType> struct_children;
-		struct_children.emplace_back("rank", LogicalType::INTEGER);
-		struct_children.emplace_back("label", LogicalType::BIGINT);
-		struct_children.emplace_back("distance", LogicalType::FLOAT);
-		auto return_type = LogicalType::LIST(LogicalType::STRUCT(std::move(struct_children)));
-
-		ScalarFunction search_function(
-		    "faiss_search", {LogicalType::VARCHAR, LogicalType::INTEGER, LogicalType::LIST(LogicalType::ANY)},
-		    return_type, SearchFunction);
-		CreateScalarFunctionInfo search_info(search_function);
-		catalog.CreateFunction(*con.context, search_info);
-
-		ScalarFunction search_function2("faiss_search_params",
-		                                {LogicalType::VARCHAR, LogicalType::INTEGER,
-		                                 LogicalType::LIST(LogicalType::ANY),
-		                                 LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR)},
-		                                return_type, SearchFunction);
-		CreateScalarFunctionInfo search_info2(search_function2);
-		catalog.CreateFunction(*con.context, search_info2);
-	}
-
-	{
-		child_list_t<LogicalType> struct_children;
-		struct_children.emplace_back("rank", LogicalType::INTEGER);
-		struct_children.emplace_back("label", LogicalType::BIGINT);
-		struct_children.emplace_back("distance", LogicalType::FLOAT);
-		auto return_type = LogicalType::LIST(LogicalType::STRUCT(std::move(struct_children)));
-
-		ScalarFunction search_function_filter("faiss_search_filter",
-		                                      {LogicalType::VARCHAR, LogicalType::INTEGER,
-		                                       LogicalType::LIST(LogicalType::ANY), LogicalType::VARCHAR,
-		                                       LogicalType::VARCHAR, LogicalType::VARCHAR},
-		                                      return_type, SearchFunctionFilter);
-		CreateScalarFunctionInfo search_info(search_function_filter);
-		catalog.CreateFunction(*con.context, search_info);
-	}
-
-	{
-		child_list_t<LogicalType> struct_children;
-		struct_children.emplace_back("rank", LogicalType::INTEGER);
-		struct_children.emplace_back("label", LogicalType::BIGINT);
-		struct_children.emplace_back("distance", LogicalType::FLOAT);
-		auto return_type = LogicalType::LIST(LogicalType::STRUCT(std::move(struct_children)));
-
-		ScalarFunction search_function_filter("faiss_search_filter_set",
-		                                      {LogicalType::VARCHAR, LogicalType::INTEGER,
-		                                       LogicalType::LIST(LogicalType::ANY), LogicalType::VARCHAR,
-		                                       LogicalType::VARCHAR, LogicalType::VARCHAR},
-		                                      return_type, SearchFunctionFilterSet);
-		CreateScalarFunctionInfo search_info(search_function_filter);
-		catalog.CreateFunction(*con.context, search_info);
-	}
-
-	{
-		TableFunction create_func("faiss_destroy", {LogicalType::VARCHAR}, DestroyFunction, DestroyBind);
-		CreateTableFunctionInfo create_info(create_func);
-		catalog.CreateTableFunction(*con.context, &create_info);
-	}
-
-	// manual training
-	{
-		TableFunction manual_train_function("faiss_manual_train", {LogicalType::TABLE, LogicalType::VARCHAR}, nullptr,
-		                                    MTrainBind, MTrainGlobalInit, MTrainLocalInit);
-		manual_train_function.in_out_function = MTrainFunction;
-		manual_train_function.in_out_function_final = MTrainFinaliseFunction;
-		CreateTableFunctionInfo manual_train_info(manual_train_function);
-		catalog.CreateTableFunction(*con.context, &manual_train_info);
-	}
-
-	// IO functions
-	{
 		TableFunction save_function("faiss_save", {LogicalType::VARCHAR, LogicalType::VARCHAR}, SaveFunction, SaveBind);
 		CreateTableFunctionInfo add_info(save_function);
 		catalog.CreateTableFunction(*con.context, &add_info);
@@ -1000,6 +1011,106 @@ static void LoadInternal(DatabaseInstance &instance) {
 		catalog.CreateTableFunction(*con.context, &add_info);
 	}
 
+	{
+		TableFunction create_func("faiss_destroy", {LogicalType::VARCHAR}, DestroyFunction, DestroyBind);
+		CreateTableFunctionInfo create_info(create_func);
+		catalog.CreateTableFunction(*con.context, &create_info);
+	}
+
+	{
+		TableFunction manual_train_function("faiss_manual_train", {LogicalType::TABLE, LogicalType::VARCHAR}, nullptr,
+		                                    MTrainBind, MTrainGlobalInit, MTrainLocalInit);
+		manual_train_function.in_out_function = MTrainFunction;
+		manual_train_function.in_out_function_final = MTrainFinaliseFunction;
+		CreateTableFunctionInfo manual_train_info(manual_train_function);
+		catalog.CreateTableFunction(*con.context, &manual_train_info);
+	}
+
+	{
+		TableFunction add_function("faiss_add", {LogicalType::TABLE, LogicalType::VARCHAR}, nullptr, AddBind,
+		                           AddGlobalInit, AddLocalInit);
+		add_function.in_out_function = AddFunction;
+		add_function.in_out_function_final = AddFinaliseFunction;
+		CreateTableFunctionInfo add_info(add_function);
+		catalog.CreateTableFunction(*con.context, &add_info);
+	}
+
+	{
+		child_list_t<LogicalType> struct_children;
+		struct_children.emplace_back("rank", LogicalType::INTEGER);
+		struct_children.emplace_back("label", LogicalType::BIGINT);
+		struct_children.emplace_back("distance", LogicalType::FLOAT);
+		auto return_type = LogicalType::LIST(LogicalType::STRUCT(std::move(struct_children)));
+
+		vector<LogicalType> parameters = {LogicalType::VARCHAR, LogicalType::INTEGER,
+		                                  LogicalType::LIST(LogicalType::ANY)};
+
+		ScalarFunction search_function("faiss_search", parameters, return_type, SearchFunction);
+		CreateScalarFunctionInfo search_info(search_function);
+		catalog.CreateFunction(*con.context, search_info);
+
+		parameters.push_back(LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR));
+		ScalarFunction search_function2("faiss_search", parameters, return_type, SearchFunction);
+		CreateScalarFunctionInfo search_info_params(search_function2);
+		search_info_params.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
+		catalog.CreateFunction(*con.context, search_info_params);
+	}
+
+	{
+		child_list_t<LogicalType> struct_children;
+		struct_children.emplace_back("rank", LogicalType::INTEGER);
+		struct_children.emplace_back("label", LogicalType::BIGINT);
+		struct_children.emplace_back("distance", LogicalType::FLOAT);
+		auto return_type = LogicalType::LIST(LogicalType::STRUCT(std::move(struct_children)));
+
+		vector<LogicalType> parameters = {
+		    LogicalType::VARCHAR, LogicalType::INTEGER, LogicalType::LIST(LogicalType::ANY),
+		    LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR};
+
+		ScalarFunction search_function("faiss_search_filter", parameters, return_type, SearchFunctionFilter);
+		CreateScalarFunctionInfo search_info(search_function);
+		catalog.CreateFunction(*con.context, search_info);
+
+		parameters.push_back(LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR));
+		ScalarFunction search_function_params("faiss_search_filter", parameters, return_type, SearchFunctionFilter);
+		CreateScalarFunctionInfo search_info_params(search_function_params);
+		search_info_params.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
+		catalog.CreateFunction(*con.context, search_info_params);
+	}
+
+	{
+		TableFunction add_function("__faiss_create_mask", {LogicalType::TABLE, LogicalType::VARCHAR}, nullptr, AddBind,
+		                           SelGlobalInit, SelLocalInit);
+		add_function.in_out_function = SelFunction;
+		add_function.in_out_function_final = SelFinaliseFunction;
+		CreateTableFunctionInfo add_info(add_function);
+		catalog.CreateTableFunction(*con.context, &add_info);
+	}
+
+	{
+		child_list_t<LogicalType> struct_children;
+		struct_children.emplace_back("rank", LogicalType::INTEGER);
+		struct_children.emplace_back("label", LogicalType::BIGINT);
+		struct_children.emplace_back("distance", LogicalType::FLOAT);
+		auto return_type = LogicalType::LIST(LogicalType::STRUCT(std::move(struct_children)));
+
+		vector<LogicalType> parameters = {
+		    LogicalType::VARCHAR, LogicalType::INTEGER, LogicalType::LIST(LogicalType::ANY),
+		    LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR};
+
+		ScalarFunction search_function("faiss_search_filter_set", parameters, return_type, SearchFunctionFilterSet);
+		CreateScalarFunctionInfo search_info(search_function);
+		catalog.CreateFunction(*con.context, search_info);
+
+		parameters.push_back(LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR));
+		ScalarFunction search_function_filter_params("faiss_search_filter_set", parameters, return_type,
+		                                             SearchFunctionFilterSet);
+		CreateScalarFunctionInfo search_info_params(search_function_filter_params);
+		search_info_params.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
+		catalog.CreateFunction(*con.context, search_info_params);
+	}
+
+	// manual training
 	con.Commit();
 }
 
@@ -1011,12 +1122,17 @@ std::string FaissExtension::Name() {
 	return "faiss";
 }
 
+std::string FaissExtension::Version() const {
+	return "0.9.0";
+}
+
 } // namespace duckdb
 
 extern "C" {
 
 DUCKDB_EXTENSION_API void faiss_init(duckdb::DatabaseInstance &db) {
-	LoadInternal(db);
+	duckdb::DuckDB db_wrapper(db);
+	db_wrapper.LoadExtension<duckdb::FaissExtension>();
 }
 
 DUCKDB_EXTENSION_API const char *faiss_version() {
