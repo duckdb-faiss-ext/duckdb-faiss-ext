@@ -49,16 +49,6 @@ Sql test:
 make test
 ```
 
-Python test:
-```sh
-make test_python
-```
-
-Javascript tests:
-```sh
-make test_js
-```
-
 ## Running the conformance/accuracy tests
 
 For now, the accuracy tests are seperate from the normal tests, since they require a large download:
