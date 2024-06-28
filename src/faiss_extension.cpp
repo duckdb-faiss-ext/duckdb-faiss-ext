@@ -323,7 +323,7 @@ static unique_ptr<FunctionData> MTrainBind(ClientContext &, TableFunctionBindInp
 
 	bind_data->key = input.inputs[1].ToString();
 
-	return bind_data;
+	return std::move(bind_data);
 }
 
 static unique_ptr<GlobalTableFunctionState> MTrainGlobalInit(ClientContext &context, TableFunctionInitInput &input) {
@@ -454,7 +454,7 @@ static unique_ptr<FunctionData> AddBind(ClientContext &context, TableFunctionBin
 		}
 	}
 
-	return bind_data;
+	return std::move(bind_data);
 }
 
 static unique_ptr<GlobalTableFunctionState> AddGlobalInit(ClientContext &context, TableFunctionInitInput &input) {
@@ -804,7 +804,7 @@ static unique_ptr<TableFunctionData> SelBind(ClientContext &context, TableFuncti
 		throw InvalidInputException("Could not find index %s.", bind_data->key);
 	}
 
-	return bind_data;
+	return std::move(bind_data);
 }
 
 static unique_ptr<GlobalTableFunctionState> SelGlobalInit(ClientContext &context, TableFunctionInitInput &input) {
@@ -812,7 +812,7 @@ static unique_ptr<GlobalTableFunctionState> SelGlobalInit(ClientContext &context
 	state->chunk = make_uniq<DataChunk>();
 	state->chunk->Initialize(context, vector<LogicalType> {LogicalType::UTINYINT, LogicalType::BIGINT});
 
-	return state;
+	return std::move(state);
 }
 
 static unique_ptr<LocalTableFunctionState> SelLocalInit(ExecutionContext &context, TableFunctionInitInput &data_p,
