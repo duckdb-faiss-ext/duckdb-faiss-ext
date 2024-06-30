@@ -1,6 +1,9 @@
 #
 # This workflow calls the main distribution pipeline from DuckDB to build, test and (optionally) release the extension
 #
+
+#TODO: fetch only duckdb in generate matrix
+
 name: Main Extension Distribution Pipeline
 on:
   push:
@@ -16,7 +19,7 @@ jobs:
     name: Build extension binaries
     uses: ./.github/workflows/_extension_distribution.yml
     with:
-      duckdb_version: v0.10.1
+      duckdb_version: v1.0.0
       extension_name: faiss
       vcpkg_commit: 3883a5d6f3851a602803137614e38edf992a2ce3
       exclude_archs: "osx_arm64;osx_amd64;windows_amd64;windows_amd64_rtools;wasm_mvp;wasm_eh;wasm_threads"
