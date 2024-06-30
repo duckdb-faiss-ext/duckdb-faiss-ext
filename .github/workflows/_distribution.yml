@@ -21,12 +21,12 @@ jobs:
       vcpkg_commit: 3883a5d6f3851a602803137614e38edf992a2ce3
       exclude_archs: "osx_arm64;osx_amd64;windows_amd64;windows_amd64_rtools;wasm_mvp;wasm_eh;wasm_threads"
 
-  duckdb-stable-deploy:
-    name: Deploy extension binaries
-    needs: duckdb-stable-build
-    uses: ./.github/workflows/_extension_deploy.yml
-    secrets: inherit
-    with:
-      duckdb_version: v0.10.1
-      extension_name: quack
-      deploy_latest: ${{ startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' }}
+      #  duckdb-stable-deploy:
+      #    name: Deploy extension binaries
+      #    needs: duckdb-stable-build
+      #    uses: ./.github/workflows/_extension_deploy.yml
+      #    secrets: inherit
+      #    with:
+      #      duckdb_version: v0.10.1
+      #      extension_name: quack
+      #      deploy_latest: ${{ startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' }}
