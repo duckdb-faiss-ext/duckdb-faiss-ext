@@ -236,6 +236,7 @@ jobs:
         uses: lukka/run-vcpkg@v11.1
         with:
           vcpkgGitCommitId: ${{ inputs.vcpkg_commit }}
+          vcpkgGitURL: "https://github.com/jaicewizard/vcpkg.git"
 
       - name: Build extension
         shell: bash
@@ -311,6 +312,7 @@ jobs:
         uses: lukka/run-vcpkg@v11.1
         with:
           vcpkgGitCommitId: ${{ inputs.vcpkg_commit }}
+          vcpkgGitURL: "https://github.com/jaicewizard/vcpkg.git"
 
       - name: Fix for MSVC issue
         shell: bash
