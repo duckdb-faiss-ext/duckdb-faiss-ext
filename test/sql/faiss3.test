@@ -58,8 +58,8 @@ SELECT UNNEST(faiss_search_filter('flat8', 2, list_value(column1, column2, colum
 {'rank': 1, 'label': 623, 'distance': 2.7383637}
 {'rank': 0, 'label': 880, 'distance': 3.6072645}
 {'rank': 1, 'label': 374, 'distance': 3.6056786}
-{'rank': 0, 'label': 904, 'distance': 2.8265002}
-{'rank': 1, 'label': 880, 'distance': 2.7492137}
+{'rank': 0, 'label': 999, 'distance': 2.866281}
+{'rank': 1, 'label': 904, 'distance': 2.8265002}
 {'rank': 0, 'label': 374, 'distance': 4.5306416}
 {'rank': 1, 'label': 676, 'distance': 4.3778625}
 {'rank': 0, 'label': 880, 'distance': 4.809322}
