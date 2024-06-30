@@ -226,7 +226,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
+      - name: check ninja
+        run: |
+          which ninja
+          ls -l /opt/homebrew/bin/ninja
       - name: Checkout DuckDB to version
         run: |
           cd duckdb
@@ -241,9 +244,27 @@ jobs:
       - name: Build extension
         shell: bash
         env:
+          GEN: ninja
           DUCKDB_PLATFORM: ${{ matrix.duckdb_arch }}
         run: |
-          make release
+          make release || true
+      - name: Build extension
+        shell: bash
+        run: |
+          cat /Users/runner/work/faiss/faiss/vcpkg/buildtrees/openblas/config-x64-osx-dbg-CMakeCache.txt.log
+      - name: Build extension
+        shell: bash
+        run: |
+          cat /Users/runner/work/faiss/faiss/vcpkg/buildtrees/openblas/config-x64-osx-rel-CMakeCache.txt.log
+      - name: Build extension
+        shell: bash
+        run: |
+          cat /Users/runner/work/faiss/faiss/vcpkg/buildtrees/openblas/config-x64-osx-out.log
+
+      - name: Build extension
+        shell: bash
+        run: |
+          cat /Users/runner/work/faiss/faiss/vcpkg/buildtrees/openblas/config-x64-osx-out.log
 
       - name: Test Extension
         if: ${{ matrix.osx_build_arch == 'x86_64'}}
