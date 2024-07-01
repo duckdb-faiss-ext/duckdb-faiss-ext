@@ -22,7 +22,7 @@ jobs:
       duckdb_version: v1.0.0
       extension_name: faiss
       vcpkg_commit: ac2657a16b691a4cf7a935aded5171b3d239506f
-      exclude_archs: "windows_amd64;windows_amd64_rtools;wasm_mvp;wasm_eh;wasm_threads"
+      exclude_archs: "windows_amd64_rtools;wasm_mvp;wasm_eh;wasm_threads"
 
       #  duckdb-stable-deploy:
       #    name: Deploy extension binaries
