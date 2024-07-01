@@ -21,8 +21,7 @@ jobs:
     with:
       duckdb_version: v1.0.0
       extension_name: faiss
-      #      vcpkg_commit: 3883a5d6f3851a602803137614e38edf992a2ce3
-      vcpkg_commit: b0d282b10ba275a8984d4bd4c6fd3a52e819a765
+      vcpkg_commit: ac2657a16b691a4cf7a935aded5171b3d239506f
       exclude_archs: "windows_amd64;windows_amd64_rtools;wasm_mvp;wasm_eh;wasm_threads"
 
       #  duckdb-stable-deploy:

@@ -208,7 +208,7 @@ jobs:
       DUCKDB_PLATFORM: ${{ matrix.duckdb_arch }}
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           submodules: 'true'
@@ -217,15 +217,28 @@ jobs:
         run: |
           brew install ninja
 
-      - name: Install fortran
+      - name: install fortran
         run: |
-          brew install gfortran
+          brew reinstall gcc
+ 
+      - name: install omp (x86)
+        if: ${{ matrix.duckdb_arch == 'osx_amd64' }}
+        run: |
+          arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install.sh)"
+          (echo; echo 'eval "$(/usr/local/bin/brew shellenv)"') >> /Users/runner/.bash_profile
+          eval "$(/usr/local/bin/brew shellenv)"
+          arch -x86_64 brew install libomp
+
+      - name: install omp (arm)
+        if: ${{ matrix.duckdb_arch == 'osx_arm64' }}
+        run: |
+          brew install libomp
 
       - name: Setup Ccache
         uses: hendrikmuhs/ccache-action@main
         with:
           key: ${{ github.job }}-${{ matrix.duckdb_arch }}
-        continue-on-error: true
+          continue-on-error: true
 
       - uses: actions/setup-python@v5
         with:
@@ -234,6 +247,7 @@ jobs:
         run: |
           which ninja
           ls -l /opt/homebrew/bin/ninja
+
       - name: Checkout DuckDB to version
         run: |
           cd duckdb
@@ -250,28 +264,22 @@ jobs:
         env:
           GEN: ninja
           DUCKDB_PLATFORM: ${{ matrix.duckdb_arch }}
+          LDFLAGS: -L/opt/homebrew/opt/libomp/lib -L/usr/local/opt/libomp/lib
+          CFLAGS: -I/opt/homebrew/opt/libomp/include -I/usr/local/opt/libomp/include
+          CPPFLAGS: -I/opt/homebrew/opt/libomp/include -I/usr/local/opt/libomp/include
+          CXXFLAGS: -I/opt/homebrew/opt/libomp/include -I/usr/local/opt/libomp/include
         run: |
-          make release || true
-      - name: Build extension
-        shell: bash
-        run: |
-          cat /Users/runner/work/faiss/faiss/vcpkg/buildtrees/openblas/config-x64-osx-dbg-CMakeCache.txt.log
-      - name: Build extension
-        shell: bash
-        run: |
-          cat /Users/runner/work/faiss/faiss/vcpkg/buildtrees/openblas/config-x64-osx-rel-CMakeCache.txt.log
-      - name: Build extension
-        shell: bash
-        run: |
-          cat /Users/runner/work/faiss/faiss/vcpkg/buildtrees/openblas/config-x64-osx-out.log
+          make release
 
       - name: Build extension
         shell: bash
+        env:
+          GEN: ninja
+          DUCKDB_PLATFORM: ${{ matrix.duckdb_arch }}
         run: |
-          cat /Users/runner/work/faiss/faiss/vcpkg/buildtrees/openblas/config-x64-osx-out.log
+          cat /Users/runner/work/faiss/faiss/build/release/vcpkg-manifest-install.log
 
       - name: Test Extension
-        if: ${{ matrix.osx_build_arch == 'x86_64'}}
         shell: bash
         run: |
           make test

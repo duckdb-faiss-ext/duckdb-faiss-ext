@@ -619,7 +619,7 @@ void searchIntoVector(ClientContext &ctx, IndexEntry &entry, Vector inputdata, s
 	Vector &result_struct_vector = ListVector::GetEntry(output);
 	vector<unique_ptr<Vector>> &struct_entries = StructVector::GetEntries(result_struct_vector);
 	int *rank_ptr = FlatVector::GetData<int32_t>(*struct_entries[0]);
-	long *label_ptr = FlatVector::GetData<int64_t>(*struct_entries[1]);
+	int64_t *label_ptr = FlatVector::GetData<int64_t>(*struct_entries[1]);
 	float *distance_ptr = FlatVector::GetData<float>(*struct_entries[2]);
 
 	idx_t list_offset = 0;
