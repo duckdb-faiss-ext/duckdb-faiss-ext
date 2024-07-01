@@ -271,14 +271,6 @@ jobs:
         run: |
           make release
 
-      - name: Build extension
-        shell: bash
-        env:
-          GEN: ninja
-          DUCKDB_PLATFORM: ${{ matrix.duckdb_arch }}
-        run: |
-          cat /Users/runner/work/faiss/faiss/build/release/vcpkg-manifest-install.log
-
       - name: Test Extension
         shell: bash
         run: |
