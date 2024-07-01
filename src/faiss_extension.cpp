@@ -691,7 +691,7 @@ void ProcessSelectionvector(unique_ptr<DataChunk> &chunk, std::vector<uint8_t> &
 	}
 	Vector data = chunk->data[0];
 	Vector ids = chunk->data[1];
-	uint8_t *__restrict__ dataBytes = data.GetData();
+	uint8_t *__restrict dataBytes = data.GetData();
 
 	bool sequential;
 	uint64_t start;
@@ -707,7 +707,7 @@ void ProcessSelectionvector(unique_ptr<DataChunk> &chunk, std::vector<uint8_t> &
 	}
 	default:
 		ids.Flatten(size); // TODO: we can do without the flatten!
-		uint64_t *__restrict__ idBytes = (uint64_t *)ids.GetData();
+		uint64_t *__restrict idBytes = (uint64_t *)ids.GetData();
 
 		uint64_t previous = idBytes[0] - 1;
 		sequential = true;
@@ -726,7 +726,7 @@ void ProcessSelectionvector(unique_ptr<DataChunk> &chunk, std::vector<uint8_t> &
 
 	// If the input is not sequential or alligned, use the slow path
 	if (!sequential) {
-		uint64_t *__restrict__ idBytes = (uint64_t *)ids.GetData();
+		uint64_t *__restrict idBytes = (uint64_t *)ids.GetData();
 		for (int i = 0; i < size; i++) {
 			uint64_t id = idBytes[i];
 			int arrIndex = id / 8;
@@ -761,7 +761,7 @@ void ProcessSelectionvector(unique_ptr<DataChunk> &chunk, std::vector<uint8_t> &
 
 void ProcessIncludeSet(unique_ptr<DataChunk> &chunk, std::vector<faiss::idx_t> &output) {
 	Vector ids = chunk->data[0];
-	uint64_t *__restrict__ idBytes = (uint64_t *)ids.GetData();
+	uint64_t *__restrict idBytes = (uint64_t *)ids.GetData();
 
 	idx_t target = output.size();
 	output.resize(output.size() + chunk->size());
