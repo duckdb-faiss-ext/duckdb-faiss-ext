@@ -1,0 +1,151 @@
+diff --git a/faiss/impl/platform_macros.h b/faiss/impl/platform_macros.h
+index 3315d040..f38c5d72 100644
+--- a/faiss/impl/platform_macros.h
++++ b/faiss/impl/platform_macros.h
+@@ -11,7 +11,7 @@
+ #include <cstdint>
+ #include <cstdio>
+ 
+-#ifdef _MSC_VER
++#ifdef _WIN32
+ 
+ /*******************************************************
+  * Windows specific macros
+@@ -23,42 +23,14 @@
+ #define FAISS_API __declspec(dllimport)
+ #endif // FAISS_MAIN_LIB
+ 
+-#ifdef _MSC_VER
+-#define strtok_r strtok_s
+-#endif // _MSC_VER
+-
+-#define __PRETTY_FUNCTION__ __FUNCSIG__
+-
+ #define posix_memalign(p, a, s) \
+     (((*(p)) = _aligned_malloc((s), (a))), *(p) ? 0 : errno)
+ #define posix_memalign_free _aligned_free
+ 
+-// aligned should be in front of the declaration
+-#define ALIGNED(x) __declspec(align(x))
+-
+ // redefine the GCC intrinsics with Windows equivalents
+ 
+ #include <intrin.h>
+ 
+-inline int __builtin_ctzll(uint64_t x) {
+-    unsigned long ret;
+-    _BitScanForward64(&ret, x);
+-    return (int)ret;
+-}
+-
+-// cudatoolkit provides __builtin_ctz for NVCC >= 11.0
+-#if !defined(__CUDACC__) || __CUDACC_VER_MAJOR__ < 11
+-inline int __builtin_ctz(unsigned long x) {
+-    unsigned long ret;
+-    _BitScanForward(&ret, x);
+-    return (int)ret;
+-}
+-#endif
+-
+-inline int __builtin_clzll(uint64_t x) {
+-    return (int)__lzcnt64(x);
+-}
+-
+ #define __builtin_popcount __popcnt
+ #define __builtin_popcountl __popcnt64
+ 
+@@ -90,14 +62,6 @@ inline int __builtin_clzll(uint64_t x) {
+ #define FAISS_API
+ #define posix_memalign_free free
+ 
+-// aligned should be *in front* of the declaration, for compatibility with
+-// windows
+-#ifdef SWIG
+-#define ALIGNED(x)
+-#else
+-#define ALIGNED(x) __attribute__((aligned(x)))
+-#endif
+-
+ #endif
+ 
+ #if defined(__GNUC__) || defined(__clang__)
+@@ -151,4 +115,54 @@ inline int __builtin_clzll(uint64_t x) {
+ #define FAISS_PRAGMA_IMPRECISE_FUNCTION_END
+ #endif
+ 
++
++#ifdef _MSC_VER 
++/*******************************************************
++ * MSC specific macros
++ *******************************************************/
++
++#define strtok_r strtok_s
++#define __PRETTY_FUNCTION__ __FUNCSIG__
++
++// redefine the GCC intrinsics with MSVC equivalents
++
++#include <intrin.h>
++
++// cudatoolkit provides __builtin_ctz for NVCC >= 11.0
++#if !defined(__CUDACC__) || __CUDACC_VER_MAJOR__ < 11
++inline int __builtin_ctz(unsigned long x) {
++    unsigned long ret;
++    _BitScanForward(&ret, x);
++    return (int)ret;
++}
++#endif
++
++inline int __builtin_ctzll(uint64_t x) {
++    unsigned long ret;
++    _BitScanForward64(&ret, x);
++    return (int)ret;
++}
++
++inline int __builtin_clzll(uint64_t x) {
++    return (int)__lzcnt64(x);
++}
++
++// aligned should be in front of the declaration
++#define ALIGNED(x) __declspec(align(x))
++#elif defined(SWIG)
++/*******************************************************
++ * SWIG specific macros
++ *******************************************************/
++
++// aligned should be *in front* of the declaration, for compatibility with
++// windows
++#define ALIGNED(x)
++#else
++/*******************************************************
++ * GCC/CLANG specific macros
++ *******************************************************/
++
++#define ALIGNED(x) __attribute__((aligned(x)))
++#endif
++
+ // clang-format on
+diff --git a/faiss/invlists/InvertedListsIOHook.cpp b/faiss/invlists/InvertedListsIOHook.cpp
+index 0081c4f9..2c3a6006 100644
+--- a/faiss/invlists/InvertedListsIOHook.cpp
++++ b/faiss/invlists/InvertedListsIOHook.cpp
+@@ -13,9 +13,9 @@
+ 
+ #include <faiss/invlists/BlockInvertedLists.h>
+ 
+-#ifndef _MSC_VER
++#ifndef _WIN32
+ #include <faiss/invlists/OnDiskInvertedLists.h>
+-#endif // !_MSC_VER
++#endif // !_WIN32
+ 
+ namespace faiss {
+ 
+@@ -33,7 +33,7 @@ namespace {
+ /// std::vector that deletes its contents
+ struct IOHookTable : std::vector<InvertedListsIOHook*> {
+     IOHookTable() {
+-#ifndef _MSC_VER
++#ifndef _WIN32
+         push_back(new OnDiskInvertedListsIOHook());
+ #endif
+         push_back(new BlockInvertedListsIOHook());

@@ -14,9 +14,11 @@ EXT_CONFIG=${PROJ_DIR}extension_config.cmake
 include extension-ci-tools/makefiles/duckdb_extension.Makefile
 
 # reldebug isn't defined by the the duckdb extension template
+# x86_64-w64-mingw32-cmake --trace-expand --debug-trycompile $(GENERATOR) ${BUILD_FLAGS} -DCMAKE_BUILD_TYPE=RelWithDebInfo -S ./duckdb/ -B build/reldebug && \
+
 reldebug:
 	mkdir -p build/reldebug && \
-	cmake $(GENERATOR) ${BUILD_FLAGS} -DCMAKE_BUILD_TYPE=RelWithDebInfo -S ./duckdb/ -B build/reldebug && \
+	cmake $(GENERATOR) ${BUILD_FLAGS} -DCMAKE_BUILD_TYPE=RelWithDebInfo -S ./duckdb/ -B build/reldebug --debug-trycompile --debug-find && \
 	cmake --build build/reldebug --config RelWithDebInfo
 
 # Client tests
