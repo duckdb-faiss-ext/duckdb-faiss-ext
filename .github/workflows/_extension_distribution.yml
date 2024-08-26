@@ -288,11 +288,6 @@ jobs:
           echo "OPENSSL_DIR=`pwd`/build/release/vcpkg_installed/${{ matrix.vcpkg_triplet }}" >> $GITHUB_ENV
           echo "OPENSSL_USE_STATIC_LIBS=true" >> $GITHUB_ENV
 
-      - name: Fix for MSVC issue
-        shell: bash
-        run: |
-          sed -i '/cmake_minimum_required(VERSION 3.23.1 FATAL_ERROR)/c\\' faiss/CMakeLists.txt
-
       ###
       # Building & testing
       ###
@@ -301,7 +296,6 @@ jobs:
           GEN: ninja
           TOOLCHAIN_FLAGS: ${{ matrix.duckdb_arch == 'linux_arm64' && '-DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ -DCMAKE_Fortran_COMPILER=aarch64-linux-gnu-gfortran' || '' }}
           DUCKDB_PLATFORM: ${{ matrix.duckdb_arch }}
-          VCPKG_BINARY_SOURCES: "clear"
         run: |
           env
           make release
@@ -414,15 +408,15 @@ jobs:
         run: |
           brew install bison flex
 
-      - name: Fix for MSVC issue
-        shell: bash
-        env:
-          OVERLAY_TRIPLET_SRC:  ${{ github.workspace }}/vcpkg/triplets/x64-osx.cmake
-          OVERLAY_TRIPLET_DST:  ${{ github.workspace }}/overlay_triplets/x64-osx.cmake
-        run: |
-          mkdir overlay_triplets
-          cp $OVERLAY_TRIPLET_SRC $OVERLAY_TRIPLET_DST
-          echo "set(VCPKG_OSX_DEPLOYMENT_TARGET 11.0)" >> $OVERLAY_TRIPLET_DST
+          #      - name: Fix for MSVC issue
+          #        shell: bash
+          #        env:
+          #          OVERLAY_TRIPLET_SRC:  ${{ github.workspace }}/vcpkg/triplets/x64-osx.cmake
+          #          OVERLAY_TRIPLET_DST:  ${{ github.workspace }}/overlay_triplets/x64-osx.cmake
+          #        run: |
+          #          mkdir overlay_triplets
+          #          cp $OVERLAY_TRIPLET_SRC $OVERLAY_TRIPLET_DST
+          #          echo "set(VCPKG_OSX_DEPLOYMENT_TARGET 11.0)" >> $OVERLAY_TRIPLET_DST
  
       - name: Build extension
         shell: bash
@@ -533,19 +527,19 @@ jobs:
         run: |
           cd faiss && git apply ../faiss.patch
 
-      - name: Fix for MSVC issue
-        shell: bash
-        env:
-          OVERLAY_TRIPLET_SRC:  ${{ github.workspace }}/vcpkg/triplets/community/x64-windows-static-md.cmake
-          OVERLAY_TRIPLET_DST:  ${{ github.workspace }}/overlay_triplets/x64-windows-static-md.cmake
-        run: |
-          mkdir overlay_triplets
-          cp $OVERLAY_TRIPLET_SRC $OVERLAY_TRIPLET_DST
-          echo "set(VCPKG_PLATFORM_TOOLSET_VERSION "14.40")" >> $OVERLAY_TRIPLET_DST
+          #      - name: Fix for MSVC issue
+      #        shell: bash
+        #        env:
+          #          OVERLAY_TRIPLET_SRC:  ${{ github.workspace }}/vcpkg/triplets/community/x64-windows-static-md.cmake
+          #          OVERLAY_TRIPLET_DST:  ${{ github.workspace }}/overlay_triplets/x64-windows-static-md.cmake
+          #        run: |
+          #          mkdir overlay_triplets
+          #          cp $OVERLAY_TRIPLET_SRC $OVERLAY_TRIPLET_DST
+          #          echo "set(VCPKG_PLATFORM_TOOLSET_VERSION "14.40")" >> $OVERLAY_TRIPLET_DST
 
       - name: Build & test extension
         env:
-          VCPKG_OVERLAY_TRIPLETS: "${{ github.workspace }}/overlay_triplets"
+          #          VCPKG_OVERLAY_TRIPLETS: "${{ github.workspace }}/overlay_triplets"
           DUCKDB_PLATFORM: ${{ matrix.duckdb_arch }}
         run: |
           make test_release || true

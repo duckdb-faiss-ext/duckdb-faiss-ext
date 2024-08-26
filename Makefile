@@ -13,9 +13,33 @@ EXT_NAME_UPPER=FAISS
 EXT_CONFIG=${PROJ_DIR}extension_config.cmake
 include extension-ci-tools/makefiles/duckdb_extension.Makefile
 
-# reldebug isn't defined by the the duckdb extension template
-# x86_64-w64-mingw32-cmake --trace-expand --debug-trycompile $(GENERATOR) ${BUILD_FLAGS} -DCMAKE_BUILD_TYPE=RelWithDebInfo -S ./duckdb/ -B build/reldebug && \
 
+prebuild:
+
+ifneq ($(DUCKDB_PLATFORM), )
+ifeq ($(findstring $(DUCKDB_PLATFORM), linux_amd64 linux_arm64), $(DUCKDB_PLATFORM))
+prebuild:
+	sed -i '/cmake_minimum_required(VERSION 3.23.1 FATAL_ERROR)/c\\' faiss/CMakeLists.txt
+endif
+ifeq ($(findstring $(DUCKDB_PLATFORM), osx_amd64 osx_arm64), $(DUCKDB_PLATFORM))
+export VCPKG_OVERLAY_TRIPLETS=$(pwd)"/overlay_triplets"
+prebuild:
+	mkdir -p overlay_triplets
+	cp vcpkg/triplets/x64-osx.cmake overlay_triplets/x64-osx.cmake
+	echo "set(VCPKG_OSX_DEPLOYMENT_TARGET 11.0)" >> overlay_triplets/x64-osx.cmake
+endif
+ifeq ($(findstring $(DUCKDB_PLATFORM), osx_amd64 osx_arm64), $(DUCKDB_PLATFORM))
+export VCPKG_OVERLAY_TRIPLETS=$(pwd)"/overlay_triplets"
+prebuild:
+	mkdir -p overlay_triplets
+	cp vcpkg/triplets/x64-osx.cmake overlay_triplets/x64-osx.cmake
+	echo "set(VCPKG_PLATFORM_TOOLSET_VERSION 14.40)" >> overlay_triplets/x64-osx.cmake
+endif
+endif
+
+release: prebuild
+
+# reldebug isn't defined by the the duckdb extension template
 reldebug:
 	mkdir -p build/reldebug && \
 	cmake $(GENERATOR) ${BUILD_FLAGS} -DCMAKE_BUILD_TYPE=RelWithDebInfo -S ./duckdb/ -B build/reldebug --debug-trycompile --debug-find && \
