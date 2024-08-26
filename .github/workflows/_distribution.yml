@@ -24,6 +24,7 @@ jobs:
       vcpkg_commit: 4973a339118ad0e2455a7dad1348baa8c27bce16
       exclude_archs: "wasm_mvp;wasm_eh;wasm_threads"
       build_duckdb_shell: false
+      extra_toolchains: "fortran"
 
       #  duckdb-stable-deploy:
       #    name: Deploy extension binaries

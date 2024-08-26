@@ -159,9 +159,18 @@ jobs:
         run: |
           apt-get update -y -qq
           apt-get install -y -qq software-properties-common
-          add-apt-repository --yes ppa:git-core/ppa
-          apt-get update -y -qq
-          apt-get install -y -qq ninja-build make gcc-multilib g++-multilib libssl-dev wget openjdk-8-jdk zip maven unixodbc-dev libc6-dev-i386 lib32readline6-dev libssl-dev libcurl4-gnutls-dev libexpat1-dev gettext unzip build-essential checkinstall libffi-dev curl libz-dev openssh-client nodejs gfortran
+          apt-get install -y -qq --fix-missing ninja-build make gcc-multilib g++-multilib libssl-dev wget openjdk-8-jdk zip maven unixodbc-dev libc6-dev-i386 lib32readline6-dev libssl-dev libcurl4-gnutls-dev libexpat1-dev gettext unzip build-essential checkinstall libffi-dev curl libz-dev openssh-client pkg-config
+
+      - name: Install required manylinux packages
+        if: ${{ matrix.duckdb_arch == 'linux_amd64_gcc4' }}
+        run: |
+          yum install -y epel-release -y pkgconfig
+
+      - name: Install cross compiler for linux_arm64
+        shell: bash
+        if: ${{ matrix.duckdb_arch == 'linux_arm64' }}
+        run: |
+          apt-get install -y -qq gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 
       - name: Install Git 2.18.5
         if: ${{ matrix.duckdb_arch == 'linux_amd64' || matrix.duckdb_arch == 'linux_arm64' }}
@@ -173,7 +182,66 @@ jobs:
           make prefix=/usr install
           git --version
 
+      - name: Setup Rust
+        if: ${{ (inputs.enable_rust || contains(format(';{0};', inputs.extra_toolchains), ';rust;')) && matrix.duckdb_arch == 'linux_amd64'}}
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Rust for cross compilation
+        if: ${{ (inputs.enable_rust || contains(format(';{0};', inputs.extra_toolchains), ';rust;')) && matrix.duckdb_arch == 'linux_arm64'}}
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+
+      - name: Setup Rust for manylinux (dtolnay/rust-toolchain doesn't work due to curl being old here)
+        if: ${{ (inputs.enable_rust || contains(format(';{0};', inputs.extra_toolchains), ';rust;')) && matrix.duckdb_arch == 'linux_amd64_gcc4' }}
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y 
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Install CMake 3.21
+        if: ${{ matrix.duckdb_arch == 'linux_amd64' || matrix.duckdb_arch == 'linux_arm64' }}
+        shell: bash
+        run: |
+          wget https://github.com/Kitware/CMake/releases/download/v3.21.3/cmake-3.21.3-linux-x86_64.sh
+          chmod +x cmake-3.21.3-linux-x86_64.sh
+          ./cmake-3.21.3-linux-x86_64.sh --skip-license --prefix=/usr/local
+          cmake --version
+
+      - name: Install parser tools
+        if: ${{ contains(format(';{0};', inputs.extra_toolchains), ';parser_tools;') && (matrix.duckdb_arch == 'linux_amd64' || matrix.duckdb_arch == 'linux_arm64') }}
+        run: |
+          apt-get install -y -qq bison flex
+
+      - name: Install parser tools (manylinux)
+        if: ${{ contains(format(';{0};', inputs.extra_toolchains), ';parser_tools;') && matrix.duckdb_arch == 'linux_amd64_gcc4'}}
+        run: |
+          yum install -y bison flex
+
+      - name: Install fortran (amd64)
+        if: ${{ contains(format(';{0};', inputs.extra_toolchains), ';fortran;') && matrix.duckdb_arch == 'linux_amd64' }}
+        run: |
+          apt-get install -y -qq gfortran
+
+      - name: Install fortran (arm64)
+        if: ${{ contains(format(';{0};', inputs.extra_toolchains), ';fortran;') && matrix.duckdb_arch == 'linux_arm64' }}
+        run: |
+          apt-get install -y -qq gfortran gfortran-aarch64-linux-gnu
+
+      ###
+      # Checkin out repositories
+      ###
       - uses: actions/checkout@v3
+        name: Checkout override repository
+        if: ${{inputs.override_repository != ''}}
+        with:
+          repository: ${{ inputs.override_repository }}
+          ref: ${{ inputs.override_ref }}
+          fetch-depth: 0
+          submodules: 'true'
+
+      - uses: actions/checkout@v3
+        name: Checkout current repository
+        if: ${{inputs.override_repository == ''}}
         with:
           fetch-depth: 0
           submodules: 'true'
@@ -186,24 +254,26 @@ jobs:
       - name: Setup ManyLinux2014
         if: ${{ matrix.duckdb_arch == 'linux_amd64_gcc4' }}
         run: |
-          # Workaround the fact that CentOS 7 is EOL
-          sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
-          sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
-          yum-config-manager --disable centos-sclo-rh
-          yum install epel-release -y
           ./duckdb/scripts/setup_manylinux2014.sh general aws-cli ccache ssh python_alias openssl
 
+      - uses: actions/checkout@v3
+        name: Checkout Extension CI tools
+        if: ${{inputs.override_ci_tools_ref != ''}}
+        with:
+          path: 'extension-ci-tools'
+          ref: ${{ inputs.override_ci_tools_ref }}
+          repository: ${{ inputs.override_ci_tools_repository }}
+          fetch-depth: 0
+
+
+      ###
+      # Runtime configuration before build
+      ###
       - name: Setup Ccache
         uses: hendrikmuhs/ccache-action@v1.2.11 # Note: pinned due to GLIBC incompatibility in later releases
         with:
           key: ${{ github.job }}-${{ matrix.duckdb_arch }}
           continue-on-error: true
-
-      - name: Setup Ubuntu
-        if: ${{ matrix.duckdb_arch == 'linux_amd64' || matrix.duckdb_arch == 'linux_arm64' }}
-        uses: ./duckdb/.github/actions/ubuntu_18_setup
-        with:
-          aarch64_cross_compile: ${{ matrix.duckdb_arch == 'linux_arm64' && 1 }}
 
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11.1
@@ -211,16 +281,21 @@ jobs:
           vcpkgGitCommitId: ${{ inputs.vcpkg_commit }}
           vcpkgGitURL: "https://github.com/jaicewizard/vcpkg.git"
 
-      - name: Install fortran
-        if: ${{ matrix.duckdb_arch == 'linux_arm64' }}
+      - name: Configure OpenSSL for Rust
+        if: ${{ (inputs.enable_rust || contains(format(';{0};', inputs.extra_toolchains), ';rust;')) }}
         run: |
-          apt-get install -y -qq gfortran-aarch64-linux-gnu
+          echo "OPENSSL_ROOT_DIR=`pwd`/build/release/vcpkg_installed/${{ matrix.vcpkg_triplet }}" >> $GITHUB_ENV
+          echo "OPENSSL_DIR=`pwd`/build/release/vcpkg_installed/${{ matrix.vcpkg_triplet }}" >> $GITHUB_ENV
+          echo "OPENSSL_USE_STATIC_LIBS=true" >> $GITHUB_ENV
 
       - name: Fix for MSVC issue
         shell: bash
         run: |
           sed -i '/cmake_minimum_required(VERSION 3.23.1 FATAL_ERROR)/c\\' faiss/CMakeLists.txt
 
+      ###
+      # Building & testing
+      ###
       - name: Build extension
         env:
           GEN: ninja
@@ -230,7 +305,6 @@ jobs:
         run: |
           env
           make release
-        # cat /__w/faiss/faiss/vcpkg/buildtrees/lapack-reference/config-arm64-linux-out.log
 
       - name: Test extension
         if: ${{ matrix.duckdb_arch != 'linux_arm64'}}
@@ -287,24 +361,37 @@ jobs:
           (echo; echo 'eval "$(/usr/local/bin/brew shellenv)"') >> /Users/runner/.bash_profile
           eval "$(/usr/local/bin/brew shellenv)"
           arch -x86_64 brew install libomp
+          echo "LDFLAGS=-L/usr/local/opt/libomp/lib" >> $GITHUB_ENV
+          echo "CFLAGS=-I/usr/local/opt/libomp/include" >> $GITHUB_ENV
+          echo "CPPFLAGS=-I/usr/local/opt/libomp/include" >> $GITHUB_ENV
+          echo "CXXFLAGS=-I/usr/local/opt/libomp/include" >> $GITHUB_ENV
+
       - name: install omp (arm)
         if: ${{ matrix.duckdb_arch == 'osx_arm64' }}
         run: |
           brew install libomp
+          echo "LDFLAGS=-L/opt/homebrew/opt/libomp/lib" >> $GITHUB_ENV
+          echo "CFLAGS=-I/opt/homebrew/opt/libomp/include" >> $GITHUB_ENV
+          echo "CPPFLAGS=-I/opt/homebrew/opt/libomp/include" >> $GITHUB_ENV
+          echo "CXXFLAGS=-I/opt/homebrew/opt/libomp/include" >> $GITHUB_ENV
 
-          #      - name: Setup Ccache
-          #uses: hendrikmuhs/ccache-action@main
-          #with:
-          #key: ${{ github.job }}-${{ matrix.duckdb_arch }}
-          #continue-on-error: true
+      - name: Setup Ccache
+        uses: hendrikmuhs/ccache-action@main
+        with:
+          key: ${{ github.job }}-${{ matrix.duckdb_arch }}
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: check ninja
-        run: |
-          which ninja
-          ls -l /opt/homebrew/bin/ninja
+
+      - uses: actions/checkout@v3
+        name: Checkout Extension CI tools
+        if: ${{inputs.override_ci_tools_ref != ''}}
+        with:
+          path: 'extension-ci-tools'
+          ref: ${{ inputs.override_ci_tools_ref }}
+          repository: ${{ inputs.override_ci_tools_repository }}
+          fetch-depth: 0
 
       - name: Checkout DuckDB to version
         run: |
@@ -316,6 +403,16 @@ jobs:
         with:
           vcpkgGitCommitId: ${{ inputs.vcpkg_commit }}
           vcpkgGitURL: "https://github.com/jaicewizard/vcpkg.git"
+
+      - name: Install Rust cross compile dependency
+        if: ${{ (inputs.enable_rust || contains(format(';{0};', inputs.extra_toolchains), ';rust;')) && matrix.osx_build_arch == 'x86_64'}}
+        run: |
+          rustup target add x86_64-apple-darwin
+
+      - name: Install parser tools
+        if: ${{ contains(format(';{0};', inputs.extra_toolchains), ';parser_tools;')}}
+        run: |
+          brew install bison flex
 
       - name: Fix for MSVC issue
         shell: bash
@@ -331,12 +428,7 @@ jobs:
         shell: bash
         env:
           VCPKG_OVERLAY_TRIPLETS: "${{ github.workspace }}/overlay_triplets"
-          GEN: ninja
           DUCKDB_PLATFORM: ${{ matrix.duckdb_arch }}
-          LDFLAGS: -L/opt/homebrew/opt/libomp/lib -L/usr/local/opt/libomp/lib
-          CFLAGS: -I/opt/homebrew/opt/libomp/include -I/usr/local/opt/libomp/include
-          CPPFLAGS: -I/opt/homebrew/opt/libomp/include -I/usr/local/opt/libomp/include
-          CXXFLAGS: -I/opt/homebrew/opt/libomp/include -I/usr/local/opt/libomp/include
         run: |
           make release
 
@@ -360,7 +452,6 @@ jobs:
     strategy:
       matrix: ${{fromJson(needs.generate_matrix.outputs.windows_matrix)}}
     env:
-      GEN: Ninja
       VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
       VCPKG_TARGET_TRIPLET: ${{ matrix.vcpkg_triplet }}
       BUILD_SHELL: ${{ inputs.build_duckdb_shell && '1' || '0' }}
@@ -376,13 +467,33 @@ jobs:
           git config --global core.eol lf
 
       - uses: actions/checkout@v3
+        name: Checkout override repository
+        if: ${{inputs.override_repository != ''}}
+        with:
+          repository: ${{ inputs.override_repository }}
+          ref: ${{ inputs.override_ref }}
+          fetch-depth: 0
+          submodules: 'true'
+
+      - uses: actions/checkout@v3
+        name: Checkout current repository
+        if: ${{inputs.override_repository == ''}}
         with:
           fetch-depth: 0
           submodules: 'true'
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.7'
+          python-version: '3.11'
+
+      - name: Setup Rust
+        if: (inputs.enable_rust || contains(format(';{0};', inputs.extra_toolchains), ';rust;'))
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install parser tools
+        if: ${{ contains(format(';{0};', inputs.extra_toolchains), ';parser_tools;')}}
+        run: |
+          choco install winflexbison3
 
       - uses: r-lib/actions/setup-r@v2
         if: matrix.duckdb_arch == 'windows_amd64_rtools'
@@ -391,10 +502,14 @@ jobs:
           update-rtools: true
           rtools-version: '42' # linker bug in 43
 
-      - name: Fix for MSVC issue
-        shell: bash
-        run: |
-          cd faiss && git apply ../faiss.patch
+      - uses: actions/checkout@v3
+        name: Checkout Extension CI tools
+        if: ${{inputs.override_ci_tools_ref != ''}}
+        with:
+          path: 'extension-ci-tools'
+          ref: ${{ inputs.override_ci_tools_ref }}
+          repository: ${{ inputs.override_ci_tools_repository }}
+          fetch-depth: 0
 
       - name: Checkout DuckDB to version
         run: |
@@ -412,6 +527,11 @@ jobs:
         with:
           vcpkgGitCommitId: ${{ inputs.vcpkg_commit }}
           vcpkgGitURL: "https://github.com/jaicewizard/vcpkg.git"
+
+      - name: Fix for MSVC issue
+        shell: bash
+        run: |
+          cd faiss && git apply ../faiss.patch
 
       - name: Fix for MSVC issue
         shell: bash
