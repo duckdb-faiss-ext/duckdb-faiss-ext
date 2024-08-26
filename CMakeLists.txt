@@ -4,8 +4,7 @@ set(TARGET_NAME faiss)
 set(EXTENSION_NAME ${TARGET_NAME}_extension)
 set(LOADABLE_EXTENSION_NAME ${TARGET_NAME}_loadable_extension)
 
-project(${TARGET_NAME} LANGUAGES CXX)
-include_directories(src/include)
+project(${TARGET_NAME})
 
 file(
   GLOB
@@ -14,14 +13,15 @@ file(
 
 set(EXTENSION_SOURCES ${EXTENSION_SOURCES})
 
+include_directories(src/include)
 include_directories(faiss/)
 # create extension targets
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
-build_loadable_extension(${TARGET_NAME} ${PARAMETERS} ${EXTENSION_SOURCES})
+build_loadable_extension(${TARGET_NAME} "" ${EXTENSION_SOURCES})
 
 set(FIND_LIBRARY_USE_LIB64_PATHS TRUE)
-# link libraries
 
+# link libraries
 set(FAISS_ENABLE_PYTHON OFF)
 set(FAISS_ENABLE_GPU OFF)
 set(BUILD_TESTING OFF)
@@ -46,10 +46,6 @@ else()
   find_package(LAPACK REQUIRED)
   target_link_libraries(${EXTENSION_NAME} ${LAPACK_LIBRARIES})
   target_link_libraries(${LOADABLE_EXTENSION_NAME} ${LAPACK_LIBRARIES})
-endif()
-
-if(APPLE)
-  target_link_libraries(${EXTENSION_NAME} "-framework Accelerate")
 endif()
 
 install(

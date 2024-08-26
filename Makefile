@@ -28,12 +28,16 @@ prebuild:
 	cp vcpkg/triplets/x64-osx.cmake overlay_triplets/x64-osx.cmake
 	echo "set(VCPKG_OSX_DEPLOYMENT_TARGET 11.0)" >> overlay_triplets/x64-osx.cmake
 endif
-ifeq ($(findstring $(DUCKDB_PLATFORM), osx_amd64 osx_arm64), $(DUCKDB_PLATFORM))
+ifeq ($(findstring $(DUCKDB_PLATFORM), windows_amd64), $(DUCKDB_PLATFORM))
 export VCPKG_OVERLAY_TRIPLETS=$(pwd)"/overlay_triplets"
 prebuild:
 	mkdir -p overlay_triplets
 	cp vcpkg/triplets/x64-osx.cmake overlay_triplets/x64-osx.cmake
 	echo "set(VCPKG_PLATFORM_TOOLSET_VERSION 14.40)" >> overlay_triplets/x64-osx.cmake
+endif
+ifeq ($(findstring $(DUCKDB_PLATFORM), windows_amd64_rtools), $(DUCKDB_PLATFORM))
+prebuild:
+	cd faiss && git apply ../faiss.patch
 endif
 endif
 
