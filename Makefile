@@ -46,7 +46,7 @@ release: prebuild
 # reldebug isn't defined by the the duckdb extension template
 reldebug:
 	mkdir -p build/reldebug && \
-	cmake $(GENERATOR) ${BUILD_FLAGS} -DCMAKE_BUILD_TYPE=RelWithDebInfo -S ./duckdb/ -B build/reldebug --debug-trycompile --debug-find && \
+	cmake $(GENERATOR) ${BUILD_FLAGS} -DCMAKE_BUILD_TYPE=RelWithDebInfo -S ./duckdb/ -B build/reldebug && \
 	cmake --build build/reldebug --config RelWithDebInfo
 
 # Client tests
