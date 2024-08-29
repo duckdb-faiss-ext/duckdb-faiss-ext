@@ -13,6 +13,36 @@ EXT_NAME_UPPER=FAISS
 EXT_CONFIG=${PROJ_DIR}extension_config.cmake
 include extension-ci-tools/makefiles/duckdb_extension.Makefile
 
+
+prebuild:
+
+ifneq ($(DUCKDB_PLATFORM), )
+ifeq ($(findstring $(DUCKDB_PLATFORM), linux_amd64 linux_arm64), $(DUCKDB_PLATFORM))
+prebuild:
+	sed -i '/cmake_minimum_required(VERSION 3.23.1 FATAL_ERROR)/c\\' faiss/CMakeLists.txt
+endif
+ifeq ($(findstring $(DUCKDB_PLATFORM), osx_amd64 osx_arm64), $(DUCKDB_PLATFORM))
+export VCPKG_OVERLAY_TRIPLETS=$(pwd)"/overlay_triplets"
+prebuild:
+	mkdir -p overlay_triplets
+	cp vcpkg/triplets/x64-osx.cmake overlay_triplets/x64-osx.cmake
+	echo "set(VCPKG_OSX_DEPLOYMENT_TARGET 11.0)" >> overlay_triplets/x64-osx.cmake
+endif
+ifeq ($(findstring $(DUCKDB_PLATFORM), windows_amd64), $(DUCKDB_PLATFORM))
+export VCPKG_OVERLAY_TRIPLETS=$(pwd)"/overlay_triplets"
+prebuild:
+	mkdir -p overlay_triplets
+	cp vcpkg/triplets/x64-osx.cmake overlay_triplets/x64-osx.cmake
+	echo "set(VCPKG_PLATFORM_TOOLSET_VERSION 14.40)" >> overlay_triplets/x64-osx.cmake
+endif
+ifeq ($(findstring $(DUCKDB_PLATFORM), windows_amd64_rtools), $(DUCKDB_PLATFORM))
+prebuild:
+	cd faiss && git apply ../faiss.patch
+endif
+endif
+
+release: prebuild
+
 # reldebug isn't defined by the the duckdb extension template
 reldebug:
 	mkdir -p build/reldebug && \
@@ -24,6 +54,15 @@ DEBUG_EXT_PATH='$(PROJ_DIR)build/debug/extension/${EXT_NAME}/${EXT_NAME}.duckdb_
 RELDEBUG_EXT_PATH='$(PROJ_DIR)build/reldebug/extension/${EXT_NAME}/${EXT_NAME}.duckdb_extension'
 GOLINKFLAGS=-L$(PROJ_DIR)/go/deps/linux_amd64 -lduckdb -lduckdb_utf8proc -lduckdb_pg_query -lduckdb_re2 -lduckdb_fmt -lduckdb_hyperloglog -lduckdb_fastpforlib -lduckdb_miniz -lduckdb_mbedtls -lduckdb_fsst -lduckdb_skiplistlib -ljson_extension -licu_extension -lfts_extension -ljemalloc_extension -lparquet_extension -ltpcds_extension -ltpch_extension -lvisualizer_extension -lfaiss_extension -lomp -lblas -llapack -lm -lstdc++ -fsanitize=undefined
 
+conformanceTests:
+	mkdir conformanceTests
+
+msmarco: conformanceTests
+	wget https://rgw.cs.uwaterloo.ca/pyserini/data/msmarco-passage-openai-ada2.tar -P conformanceTests/ && tar xvf conformanceTests/msmarco-passage-openai-ada2.tar -C conformanceTests/
+
+ansirini_tools: conformanceTests
+	cd conformanceTests && git clone https://github.com/castorini/anserini-tools
+
 go_setup: reldebug
 	cp $(PROJ_DIR)/build/reldebug/src/libduckdb_static.a $(PROJ_DIR)/go/deps/linux_amd64/libduckdb.a
 	cp $(PROJ_DIR)/build/reldebug/third_party/**/*.a $(PROJ_DIR)/go/deps/linux_amd64
@@ -31,9 +70,9 @@ go_setup: reldebug
 
 go/faissextcode.test: go_setup
 	cd go && CGO_LDFLAGS="$(GOLINKFLAGS)" go test -c .
-go/create_index: go_setup
+go/create_index: go_setup msmarco
 	cd go && CGO_LDFLAGS="$(GOLINKFLAGS)" go build faissextcode/cmd/create_index
-go/create_trec: go_setup
+go/create_trec: go_setup ansirini_tools
 	cd go && CGO_LDFLAGS="$(GOLINKFLAGS)" go build faissextcode/cmd/create_trec
 
 indices/%:

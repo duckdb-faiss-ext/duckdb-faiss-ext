@@ -19,53 +19,53 @@ SELECT * FROM queries WHERE column0 > 10
 statement ok
 CALL faiss_add((SELECT column0, list_value(column1, column2, column3, column4, column5, column6, column7, column8) emb FROM training), 'flat8')
 
-query I
-SELECT UNNEST(faiss_search('flat8', 2, list_value(column1, column2, column3, column4, column5, column6, column7, column8))) FROM 'test/sql/queries.csv';
+query III
+SELECT rank, label, round(distance, 5) FROM (SELECT UNNEST(faiss_search('flat8', 2, list_value(column1, column2, column3, column4, column5, column6, column7, column8)), recursive:=true) FROM 'test/sql/queries.csv');
 ----
-{'rank': 0, 'label': 374, 'distance': 2.3337207}
-{'rank': 1, 'label': 59, 'distance': 2.2165565}
-{'rank': 0, 'label': 374, 'distance': 3.5882926}
-{'rank': 1, 'label': 676, 'distance': 3.336133}
-{'rank': 0, 'label': 768, 'distance': 4.2489142}
-{'rank': 1, 'label': 880, 'distance': 4.133893}
-{'rank': 0, 'label': 374, 'distance': 3.3984408}
-{'rank': 1, 'label': 623, 'distance': 3.1702023}
-{'rank': 0, 'label': 374, 'distance': 2.8143706}
-{'rank': 1, 'label': 623, 'distance': 2.7383637}
-{'rank': 0, 'label': 59, 'distance': 3.7191334}
-{'rank': 1, 'label': 880, 'distance': 3.6072645}
-{'rank': 0, 'label': 999, 'distance': 2.866281}
-{'rank': 1, 'label': 904, 'distance': 2.8265002}
-{'rank': 0, 'label': 374, 'distance': 4.5306416}
-{'rank': 1, 'label': 676, 'distance': 4.3778625}
-{'rank': 0, 'label': 880, 'distance': 4.809322}
-{'rank': 1, 'label': 955, 'distance': 4.7254314}
-{'rank': 0, 'label': 943, 'distance': 5.233301}
-{'rank': 1, 'label': 374, 'distance': 5.0149097}
+0	374	2.3337207
+1	59	2.2165565
+0	374	3.5882926
+1	676	3.336133
+0	768	4.2489142
+1	880	4.133893
+0	374	3.3984408
+1	623	3.1702023
+0	374	2.8143706
+1	623	2.7383637
+0	59	3.7191334
+1	880	3.6072645
+0	999	2.866281
+1	904	2.8265002
+0	374	4.5306416
+1	676	4.3778625
+0	880	4.809322
+1	955	4.7254314
+0	943	5.233301
+1	374	5.0149097
 
-query I
-SELECT UNNEST(faiss_search_filter('flat8', 2, list_value(column1, column2, column3, column4, column5, column6, column7, column8), 'column0>100', 'column0', 'training')) FROM 'test/sql/queries.csv';
+query III
+SELECT rank, label, round(distance, 5) FROM (SELECT UNNEST(faiss_search_filter('flat8', 2, list_value(column1, column2, column3, column4, column5, column6, column7, column8), 'column0>100', 'column0', 'training'), recursive:=true) FROM 'test/sql/queries.csv');
 ----
-{'rank': 0, 'label': 374, 'distance': 2.3337207}
-{'rank': 1, 'label': 676, 'distance': 2.1709425}
-{'rank': 0, 'label': 374, 'distance': 3.5882926}
-{'rank': 1, 'label': 676, 'distance': 3.336133}
-{'rank': 0, 'label': 768, 'distance': 4.2489142}
-{'rank': 1, 'label': 880, 'distance': 4.133893}
-{'rank': 0, 'label': 374, 'distance': 3.3984408}
-{'rank': 1, 'label': 623, 'distance': 3.1702023}
-{'rank': 0, 'label': 374, 'distance': 2.8143706}
-{'rank': 1, 'label': 623, 'distance': 2.7383637}
-{'rank': 0, 'label': 880, 'distance': 3.6072645}
-{'rank': 1, 'label': 374, 'distance': 3.6056786}
-{'rank': 0, 'label': 904, 'distance': 2.8265002}
-{'rank': 1, 'label': 880, 'distance': 2.7492137}
-{'rank': 0, 'label': 374, 'distance': 4.5306416}
-{'rank': 1, 'label': 676, 'distance': 4.3778625}
-{'rank': 0, 'label': 880, 'distance': 4.809322}
-{'rank': 1, 'label': 955, 'distance': 4.7254314}
-{'rank': 0, 'label': 943, 'distance': 5.233301}
-{'rank': 1, 'label': 374, 'distance': 5.0149097}
+0	374	2.33372
+1	676	2.17094
+0	374	3.58829
+1	676	3.33613
+0	768	4.24891
+1	880	4.13389
+0	374	3.39844
+1	623	3.1702
+0	374	2.81437
+1	623	2.73836
+0	880	3.60726
+1	374	3.60568
+0	999	2.86628
+1	904	2.8265
+0	374	4.53064
+1	676	4.37786
+0	880	4.80932
+1	955	4.72543
+0	943	5.2333
+1	374	5.01491
 
 statement ok
 CALL faiss_destroy('flat8');

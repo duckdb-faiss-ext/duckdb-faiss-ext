@@ -1,32 +1,38 @@
 #
 # This workflow calls the main distribution pipeline from DuckDB to build, test and (optionally) release the extension
 #
-# name: Main Extension Distribution Pipeline
-# on:
-#   push:
-#   pull_request:
-#   workflow_dispatch:
 
-# concurrency:
-#   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.head_ref || '' }}-${{ github.base_ref || '' }}-${{ github.ref != 'refs/heads/main' || github.sha }}
-#   cancel-in-progress: true
+#TODO: fetch only duckdb in generate matrix
 
-# jobs:
-#   duckdb-stable-build:
-#     name: Build extension binaries
-#     uses: ./.github/workflows/_extension_distribution.yml
-#     with:
-#       duckdb_version: v0.10.1
-#       extension_name: faiss
-#       vcpkg_commit: 3883a5d6f3851a602803137614e38edf992a2ce3
-#       exclude_archs: "osx_arm64;osx_amd64;windows_amd64;windows_amd64_rtools;wasm_mvp;wasm_eh;wasm_threads"
+name: Main Extension Distribution Pipeline
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
 
-  # duckdb-stable-deploy:
-  #   name: Deploy extension binaries
-  #   needs: duckdb-stable-build
-  #   uses: ./.github/workflows/_extension_deploy.yml
-  #   secrets: inherit
-  #   with:
-  #     duckdb_version: v0.10.1
-  #     extension_name: quack
-  #     deploy_latest: ${{ startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' }}
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.head_ref || '' }}-${{ github.base_ref || '' }}-${{ github.ref != 'refs/heads/main' || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  duckdb-stable-build:
+    name: Build extension binaries
+    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@main
+    with:
+      duckdb_version: v1.0.0
+      extension_name: faiss
+      vcpkg_url: "https://github.com/jaicewizard/vcpkg.git"
+      vcpkg_commit: 4973a339118ad0e2455a7dad1348baa8c27bce16
+      exclude_archs: "wasm_mvp;wasm_eh;wasm_threads"
+      build_duckdb_shell: false
+      extra_toolchains: "fortran;omp"
+
+      #  duckdb-stable-deploy:
+      #    name: Deploy extension binaries
+      #    needs: duckdb-stable-build
+      #    uses: ./.github/workflows/_extension_deploy.yml
+      #    secrets: inherit
+      #    with:
+      #      duckdb_version: v0.10.1
+      #      extension_name: quack
+      #      deploy_latest: ${{ startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' }}
