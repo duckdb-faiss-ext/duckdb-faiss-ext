@@ -43,6 +43,30 @@ https://github.com/facebookresearch/faiss/wiki/The-index-factory
 
 https://github.com/facebookresearch/faiss/wiki/Faiss-indexes
 
+## Example
+
+Here is one example, using random data. You can play with the dimensionality, number of datapoints, number of queries, and the faiss index type.
+If you want to modify add parameters as well, check out how to use the `_param` variants below. 
+
+```
+-- Generate semi-random input data and queries
+-- Note that the dimensionality of our data will be 5
+CREATE TABLE input AS SELECT i as id, apply(generate_series(1, 5), j-> CAST(hash(i*1000+j) AS FLOAT)/18446744073709551615) as data FROM generate_series(1, 1000) s(i);
+CREATE TABLE queries AS SELECT i as id, apply(generate_series(1, 5), j-> CAST(hash(i*1000+j+8047329823) AS FLOAT)/18446744073709551615) as data FROM generate_series(1, 10) s(i);
+-- Create the index
+CALL FAISS_CREATE('name', 5, 'IDMap,HNSW32');
+-- Optionally, we can manually train the index. Possible using a subset of the data.
+-- CALL FAISS_MANUAL_TRAIN((SELECT data FROM input), 'name');
+-- Insert the data into the index
+CALL FAISS_ADD((SELECT id, data FROM input), 'name');
+-- Get 10 results with uneven id
+SELECT id, UNNEST(FAISS_SEARCH_FILTER('name', 10, data, 'id%2==0', 'rowid', 'input')) FROM queries;
+-- Get 10 results with even id
+SELECT id, UNNEST(FAISS_SEARCH_FILTER('name', 10, data, 'id%2==0', 'rowid', 'input')) FROM queries;
+-- Get 10 results
+SELECT id, UNNEST(FAISS_SEARCH('name', 10, data)) FROM queries;
+```
+
 ## Running the tests
 Sql test:
 ```sh
@@ -51,14 +75,8 @@ make test
 
 ## Running the conformance/accuracy tests
 
-For now, the accuracy tests are seperate from the normal tests, since they require a large download:
-
-```
-wget https://rgw.cs.uwaterloo.ca/pyserini/data/msmarco-passage-openai-ada2.tar -P conformanceTests/
-tar xvf conformanceTests/msmarco-passage-openai-ada2.tar -C conformanceTests/
-```
-_hello_
-Running the conformance tests:
+For now, the accuracy tests are seperate from the normal tests, since they require a large download.
+To run the index index accuracy tests run:
 
 ```
 make run_msmarco_queries
@@ -228,4 +246,3 @@ For context, currently the way this filter is constructed, is by executing appro
  Ideas that could still be implemented
   [ ] Use array of fixed size instead of lists as input for greater type-safety
   [ ] Check types of input, again for greater type-safety
-  [ ] Add some kind of support for sequence vectors storage to duckdb, among other optimisations that would allow this extension to perform better

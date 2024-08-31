@@ -57,10 +57,10 @@ GOLINKFLAGS=-L$(PROJ_DIR)/go/deps/linux_amd64 -lduckdb -lduckdb_utf8proc -lduckd
 conformanceTests:
 	mkdir conformanceTests
 
-msmarco: conformanceTests
+conformanceTests/msmarco-passage-openai-ada2: conformanceTests
 	wget https://rgw.cs.uwaterloo.ca/pyserini/data/msmarco-passage-openai-ada2.tar -P conformanceTests/ && tar xvf conformanceTests/msmarco-passage-openai-ada2.tar -C conformanceTests/
 
-ansirini_tools: conformanceTests
+conformanceTests/anserini-tools: conformanceTests
 	cd conformanceTests && git clone https://github.com/castorini/anserini-tools
 
 go_setup: reldebug
@@ -70,9 +70,9 @@ go_setup: reldebug
 
 go/faissextcode.test: go_setup
 	cd go && CGO_LDFLAGS="$(GOLINKFLAGS)" go test -c .
-go/create_index: go_setup msmarco
+go/create_index: go_setup conformanceTests/msmarco-passage-openai-ada2
 	cd go && CGO_LDFLAGS="$(GOLINKFLAGS)" go build faissextcode/cmd/create_index
-go/create_trec: go_setup ansirini_tools
+go/create_trec: go_setup conformanceTests/anserini-tools
 	cd go && CGO_LDFLAGS="$(GOLINKFLAGS)" go build faissextcode/cmd/create_trec
 
 indices/%:
@@ -83,6 +83,10 @@ create_indices: indices/IDMap,HNSW128,Flat indices/IVF2048_HNSW128,Flat
 
 benchmark: go/faissextcode.test
 	go/faissextcode.test -test.run="^$$" -test.bench=. -test.benchtime=30s -test.timeout=12h | tee results
+
+run_msmarco_queries: indices/IDMap,HNSW128,Flat
+	FAISS_EXTENSION_BINARY_PATH='build/reldebug/extension/faiss/faiss.duckdb_extension' go/create_trec
+	
 
 install_local: install_release_local
 install_release_local: release
