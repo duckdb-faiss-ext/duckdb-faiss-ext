@@ -48,7 +48,7 @@ https://github.com/facebookresearch/faiss/wiki/Faiss-indexes
 Here is one example, using random data. You can play with the dimensionality, number of datapoints, number of queries, and the faiss index type.
 If you want to modify add parameters as well, check out how to use the `_param` variants below. 
 
-```
+```sql
 -- Generate semi-random input data and queries
 -- Note that the dimensionality of our data will be 5
 CREATE TABLE input AS SELECT i as id, apply(generate_series(1, 5), j-> CAST(hash(i*1000+j) AS FLOAT)/18446744073709551615) as data FROM generate_series(1, 1000) s(i);
