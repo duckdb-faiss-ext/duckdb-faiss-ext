@@ -9,7 +9,7 @@ INSTALL faiss FROM community;
 
 From then on you can load the extension using sql:
 ```sql
-INSTALL faiss FROM community;
+load faiss;
 ```
 
 If at any point you update duckdb, you have to install the extension again.
@@ -71,6 +71,8 @@ There are also benchmarks directly against vss, these use the same methodology a
 
 ![Comparison against vss](plots/vss.png)
 
+The batch size is 1, since VSS doesn't support batches (yet). The number of results are computed based on the passingrate, setting the binomial(P) CDF to 99.
+
 Note that this is a Logarithmic scale, since otherwise the only thing you could see would be one SQL line and one VSS/FAISS line.
 As you can see faiss is significantly faster using single-query batch queries (since vss doesn't support batch operations).
 
@@ -81,7 +83,7 @@ It is important to note that faiss can to batch operations, and is heavily optim
 The faiss extension provides several functions that can be used to interact with faiss. These are split into a couple general catagories: Creation/deletion, adding, and searching.
 You can see the all these functions below
 
-[##](##.md) Creation/Deletion
+## Creation/Deletion
 
 These functions allow you to do all kinds of things with indexes, without modifying the data.
 
@@ -275,6 +277,7 @@ make run_msmarco_queries
 
 # TODO list
 
- Ideas that could still be implemented
-  [ ] Use array of fixed size instead of lists as input for greater type-safety
-  [ ] Check types of input, again for greater type-safety
+Ideas that could still be implemented
+
+ - [ ] Use array of fixed size instead of lists as input for greater type-safety
+ - [ ] Check types of input, again for greater type-safety
