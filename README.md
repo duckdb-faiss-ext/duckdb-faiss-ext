@@ -1,24 +1,20 @@
-# Getting started
-First step to getting started is to clone this repo: 
-```sh
-git clone --recurse-submodules https://github.com/arjenpdevries/faiss.git
-```
-Note that `--recurse-submodules` will ensure the correct version of duckdb is pulled allowing you to get started right away.
 
-## Building the extension
-To build the extension:
-```sh
-make
+# Getting started
+
+## Installing the extension
+This extension can be installed form the community repository:
+```sql
+INSTALL faiss FROM community;
 ```
-The main binaries that will be built are:
-```sh
-./build/release/duckdb
-./build/release/test/unittest
-./build/release/extension/faiss/faiss.duckdb_extension
+
+From then on you can load the extension using sql:
+```sql
+load faiss;
 ```
-- `duckdb` is the binary for the duckdb shell with the extension code automatically loaded. 
-- `unittest` is the test runner of duckdb. Again, the extension is already linked into the binary.
-- `faiss.duckdb_extension` is the loadable binary as it would be distributed.
+
+If at any point you update duckdb, you have to install the extension again.
+
+This extension can also be compiled yourslelf, see [Building the extension](#Building-the-extension).
 
 ## Running the extension
 To run the extension code, simply start the shell with `build/release/duckdb`.
@@ -67,20 +63,20 @@ SELECT id, UNNEST(FAISS_SEARCH_FILTER('name', 10, data, 'id%2==0', 'rowid', 'inp
 SELECT id, UNNEST(FAISS_SEARCH('name', 10, data)) FROM queries;
 ```
 
-## Running the tests
-Sql test:
-```sh
-make test
-```
+# Benchmarks
 
-## Running the conformance/accuracy tests
+The initial thesis this was written for, can be found [here](https://www.cs.ru.nl/bachelors-theses/2024/Jaap_Aarts___1056714___Implementing_in-Database_Similarity_Search.pdf). This contains benchmarks of all 3 methods implemented in this extension, for 3 different indexes, 2 IFV and one HNSW on page 26-28. This also has one comparison against the vss extension for duckdb, however this is outdated and only includes a small amount of data. The methodology section also provides the setup and details on the benchmarks.
 
-For now, the accuracy tests are seperate from the normal tests, since they require a large download.
-To run the index index accuracy tests run:
+There are also benchmarks directly against vss, these use the same methodology as the thesis above. Here is the graph of VSS vs FAISS vs SQL:
 
-```
-make run_msmarco_queries
-```
+![Comparison against vss](plots/vss.png)
+
+The batch size is 1, since VSS doesn't support batches (yet). The number of results are computed based on the passingrate, setting the binomial(P) CDF to 99.
+
+Note that this is a Logarithmic scale, since otherwise the only thing you could see would be one SQL line and one VSS/FAISS line.
+As you can see faiss is significantly faster using single-query batch queries (since vss doesn't support batch operations).
+
+It is important to note that faiss can to batch operations, and is heavily optimised for it. For example, using a batch of 48 queries is only 25% slower than a single query batch. (not included in this graph).
 
 # Functions
 
@@ -241,8 +237,47 @@ CALL faiss_search_filter_set(string name, integer k, List q, MAP<string, string>
 
 For context, currently the way this filter is constructed, is by executing approximatly this query: `SELECT {idselector} FROM {tablename} WHERE {filter}=1`. All the ids for which the filter is `1`, will be selected for search. The amount of rows in `table` is assumed to be equal to the amount of vectors. If this is not the case, the extension might crash. This function creates a set of size `m` where `m` is the amount of vectors that are included in the search, this operation is `O(m)`.
 
- # TODO list
+# Compiling yourself
+First step to getting started is to clone this repo: 
+```sh
+git clone --recurse-submodules https://github.com/arjenpdevries/faiss.git
+```
+Note that `--recurse-submodules` will ensure the correct version of duckdb is pulled allowing you to get started right away.
 
- Ideas that could still be implemented
-  [ ] Use array of fixed size instead of lists as input for greater type-safety
-  [ ] Check types of input, again for greater type-safety
+## Building the extension
+To build the extension:
+```sh
+make
+```
+The main binaries that will be built are:
+```sh
+./build/release/duckdb
+./build/release/test/unittest
+./build/release/extension/faiss/faiss.duckdb_extension
+```
+- `duckdb` is the binary for the duckdb shell with the extension code automatically loaded. 
+- `unittest` is the test runner of duckdb. Again, the extension is already linked into the binary.
+- `faiss.duckdb_extension` is the loadable binary as it would be distributed.
+
+## Running the tests
+Sql test:
+```sh
+make test
+```
+
+## Running the conformance/accuracy tests
+
+For now, the accuracy tests are seperate from the normal tests, since they require a large download.
+To run the index index accuracy tests run:
+
+```
+make run_msmarco_queries
+```
+
+
+# TODO list
+
+Ideas that could still be implemented
+
+ - [ ] Use array of fixed size instead of lists as input for greater type-safety
+ - [ ] Check types of input, again for greater type-safety
