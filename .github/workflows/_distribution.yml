@@ -22,7 +22,7 @@ jobs:
       duckdb_version: v1.0.0
       extension_name: faiss
       vcpkg_url: "https://github.com/jaicewizard/vcpkg.git"
-      vcpkg_commit: 4973a339118ad0e2455a7dad1348baa8c27bce16
+      vcpkg_commit: cf6839973a3d75aad2449e24c35ee9929512c308
       exclude_archs: "wasm_mvp;wasm_eh;wasm_threads"
       build_duckdb_shell: false
       extra_toolchains: "fortran;omp"
