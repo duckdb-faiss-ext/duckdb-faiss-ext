@@ -32,16 +32,23 @@ ifeq ($(findstring $(DUCKDB_PLATFORM), windows_amd64), $(DUCKDB_PLATFORM))
 export VCPKG_OVERLAY_TRIPLETS=$(pwd)"/overlay_triplets"
 prebuild:
 	mkdir -p overlay_triplets
-	cp vcpkg/triplets/x64-osx.cmake overlay_triplets/x64-osx.cmake
-	echo "set(VCPKG_PLATFORM_TOOLSET_VERSION 14.40)" >> overlay_triplets/x64-osx.cmake
+	cp vcpkg/triplets/x64-windows.cmake overlay_triplets/x64-windows.cmake
+	echo "set(VCPKG_PLATFORM_TOOLSET_VERSION 14.40)" >> overlay_triplets/x64-windows.cmake
 endif
-ifeq ($(findstring $(DUCKDB_PLATFORM), windows_amd64_rtools), $(DUCKDB_PLATFORM))
+ifeq ($(findstring $(DUCKDB_PLATFORM), windows_amd64_rtools), windows_amd64_rtools)
 prebuild:
+	mkdir -p overlay_triplets
 	cd faiss && git apply ../faiss.patch
+	cp vcpkg/triplets/community/x64-mingw-static.cmake overlay_triplets/x64-mingw-static.cmake
+	echo "set(VCPKG_BUILD_TYPE release)" >> overlay_triplets/x64-mingw-static.cmake
 release: prebuild
+	vcpkg install --triplet=x64-mingw-static
+	ls D:/a/faiss/faiss/vcpkg_installed/
+	ls D:/a/faiss/faiss/vcpkg_installed/x64-mingw-static/
+	ls D:/a/faiss/faiss/vcpkg_installed/x64-mingw-static/lib/
 	mkdir -p build/reldebug && \
-	cmake $(GENERATOR) ${BUILD_FLAGS} -DCMAKE_BUILD_TYPE=RelWithDebInfo -S ./duckdb/ -B build/reldebug && \
-	cmake --build build/reldebug --config RelWithDebInfo
+	cmake $(GENERATOR) ${BUILD_FLAGS} -DCMAKE_BUILD_TYPE=RelWithDebInfo -S ./duckdb/ -B build/reldebug | true
+	cmake --build build/reldebug --config RelWithDebInfo | true
 	cat D:/a/faiss/faiss/build/release/vcpkg_installed/x64-mingw-static/lib/libopenblas.a
 endif
 endif
