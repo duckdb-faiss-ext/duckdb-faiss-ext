@@ -38,6 +38,11 @@ endif
 ifeq ($(findstring $(DUCKDB_PLATFORM), windows_amd64_rtools), $(DUCKDB_PLATFORM))
 prebuild:
 	cd faiss && git apply ../faiss.patch
+release: prebuild
+	mkdir -p build/reldebug && \
+	cmake $(GENERATOR) ${BUILD_FLAGS} -DCMAKE_BUILD_TYPE=RelWithDebInfo -S ./duckdb/ -B build/reldebug && \
+	cmake --build build/reldebug --config RelWithDebInfo
+	cat D:/a/faiss/faiss/build/release/vcpkg_installed/x64-mingw-static/lib/libopenblas.a
 endif
 endif
 
