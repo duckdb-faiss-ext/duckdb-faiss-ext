@@ -35,9 +35,12 @@ prebuild:
 	cp vcpkg/triplets/x64-osx.cmake overlay_triplets/x64-osx.cmake
 	echo "set(VCPKG_PLATFORM_TOOLSET_VERSION 14.40)" >> overlay_triplets/x64-osx.cmake
 endif
-ifeq ($(findstring $(DUCKDB_PLATFORM), windows_amd64_rtools), $(DUCKDB_PLATFORM))
+ifeq ($(findstring $(DUCKDB_PLATFORM), windows_amd64_rtools), windows_amd64_rtools)
 prebuild:
 	cd faiss && git apply ../faiss.patch
+	cp C:/rtools42/x86_64-w64-mingw32.static.posix/bin/gcc.exe C:/rtools42/x86_64-w64-mingw32.static.posix/bin/x86_64-w64-mingw32-gcc.exe 
+	cp C:/rtools42/x86_64-w64-mingw32.static.posix/bin/g++.exe C:/rtools42/x86_64-w64-mingw32.static.posix/bin/x86_64-w64-mingw32-g++.exe 
+	cp C:/rtools42/x86_64-w64-mingw32.static.posix/bin/gfortran.exe C:/rtools42/x86_64-w64-mingw32.static.posix/bin/x86_64-w64-mingw32-gfortran.exe 
 endif
 endif
 
