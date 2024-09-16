@@ -19,6 +19,7 @@ prebuild:
 ifneq ($(DUCKDB_PLATFORM), )
 ifeq ($(findstring $(DUCKDB_PLATFORM), linux_amd64 linux_arm64), $(DUCKDB_PLATFORM))
 prebuild:
+	cd faiss && git apply ../faiss-linux.patch # should be fixed in 1.8.1 (https://github.com/facebookresearch/faiss/pull/3860)
 	sed -i '/cmake_minimum_required(VERSION 3.23.1 FATAL_ERROR)/c\\' faiss/CMakeLists.txt
 endif
 ifeq ($(findstring $(DUCKDB_PLATFORM), osx_amd64 osx_arm64), $(DUCKDB_PLATFORM))
