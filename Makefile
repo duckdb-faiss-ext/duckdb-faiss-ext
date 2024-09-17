@@ -19,8 +19,13 @@ prebuild:
 ifneq ($(DUCKDB_PLATFORM), )
 ifeq ($(findstring $(DUCKDB_PLATFORM), linux_amd64 linux_arm64), $(DUCKDB_PLATFORM))
 prebuild:
-	cd faiss && git apply ../faiss-linux.patch # should be fixed in 1.8.1 (https://github.com/facebookresearch/faiss/pull/3860)
+	# linux should be fixed in 1.8.1 (https://github.com/facebookresearch/faiss/pull/3860)
+	cd faiss; git status -s; if [ -z "$(git status -s)" ]; then \
+		git apply ../faiss-linux.patch; \
+		git apply ../faiss-arm.patch; \
+	fi
 	sed -i '/cmake_minimum_required(VERSION 3.23.1 FATAL_ERROR)/c\\' faiss/CMakeLists.txt
+	touch prebuild # make sure this rule doesnt get run twice?
 endif
 ifeq ($(findstring $(DUCKDB_PLATFORM), osx_amd64 osx_arm64), $(DUCKDB_PLATFORM))
 export VCPKG_OVERLAY_TRIPLETS=$(pwd)"/overlay_triplets"
