@@ -19,7 +19,13 @@ prebuild:
 ifneq ($(DUCKDB_PLATFORM), )
 ifeq ($(findstring $(DUCKDB_PLATFORM), linux_amd64 linux_arm64), $(DUCKDB_PLATFORM))
 prebuild:
+	# linux should be fixed in 1.8.1 (https://github.com/facebookresearch/faiss/pull/3860)
+	cd faiss; git status -s; if [ -z "$(git status -s)" ]; then \
+		git apply ../faiss-linux.patch; \
+		git apply ../faiss-arm.patch; \
+	fi
 	sed -i '/cmake_minimum_required(VERSION 3.23.1 FATAL_ERROR)/c\\' faiss/CMakeLists.txt
+	touch prebuild # make sure this rule doesnt get run twice?
 endif
 ifeq ($(findstring $(DUCKDB_PLATFORM), osx_amd64 osx_arm64), $(DUCKDB_PLATFORM))
 export VCPKG_OVERLAY_TRIPLETS=$(pwd)"/overlay_triplets"
@@ -35,9 +41,12 @@ prebuild:
 	cp vcpkg/triplets/x64-osx.cmake overlay_triplets/x64-osx.cmake
 	echo "set(VCPKG_PLATFORM_TOOLSET_VERSION 14.40)" >> overlay_triplets/x64-osx.cmake
 endif
-ifeq ($(findstring $(DUCKDB_PLATFORM), windows_amd64_rtools), $(DUCKDB_PLATFORM))
+ifeq ($(findstring $(DUCKDB_PLATFORM), windows_amd64_rtools), windows_amd64_rtools)
 prebuild:
 	cd faiss && git apply ../faiss.patch
+	cp C:/rtools42/x86_64-w64-mingw32.static.posix/bin/gcc.exe C:/rtools42/x86_64-w64-mingw32.static.posix/bin/x86_64-w64-mingw32-gcc.exe 
+	cp C:/rtools42/x86_64-w64-mingw32.static.posix/bin/g++.exe C:/rtools42/x86_64-w64-mingw32.static.posix/bin/x86_64-w64-mingw32-g++.exe 
+	cp C:/rtools42/x86_64-w64-mingw32.static.posix/bin/gfortran.exe C:/rtools42/x86_64-w64-mingw32.static.posix/bin/x86_64-w64-mingw32-gfortran.exe 
 endif
 endif
 
