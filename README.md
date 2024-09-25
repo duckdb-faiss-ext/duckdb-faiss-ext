@@ -14,7 +14,7 @@ load faiss;
 
 If at any point you update duckdb, you have to install the extension again.
 
-This extension can also be compiled yourslelf, see [Building the extension](#Building-the-extension).
+This extension can also be compiled yourself, see [Building the extension](#Building-the-extension).
 
 ## Running the extension
 To run the extension code, simply start the shell with `build/release/duckdb`.
