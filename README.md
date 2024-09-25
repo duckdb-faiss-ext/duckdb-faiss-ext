@@ -16,6 +16,14 @@ If at any point you update duckdb, you have to install the extension again.
 
 This extension can also be compiled yourslelf, see [Building the extension](#Building-the-extension).
 
+### Macos
+
+If you are on Macos, you will need to install openmp runtime libraries. This can be done via brew:
+
+```
+brew install libomp
+```
+
 ## Running the extension
 To run the extension code, simply start the shell with `build/release/duckdb`.
 
