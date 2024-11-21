@@ -39,6 +39,7 @@
 #include "faiss/index_io.h"
 #include "maputils.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <ostream>
@@ -510,12 +511,23 @@ static OperatorResultType AddFunction(ExecutionContext &context, TableFunctionIn
 		try {
 			if (entry.custom_labels == TRUE) {
 				entry.index->add_with_ids((faiss::idx_t)input.size(), child_ptr, label_ptr);
-			} else {
+			} else if (entry.custom_labels == FALSE) {
 				entry.index->add((faiss::idx_t)input.size(), child_ptr);
 			}
-		} catch (faiss::FaissException e) {
+		} catch (faiss::FaissException exception) {
+			// This should reset if no data was added for some reason.
+			if (entry.custom_labels == TRUE && entry.index->ntotal == 0) {
+				entry_ptr.get()->custom_labels = UNDECIDED;
+			}
+
 			entry.faiss_lock.get()->unlock();
-			throw InvalidInputException("Unable to add data: %s", e.what());
+			std::string msg = exception.msg;
+			if (msg.find("add_with_ids not implemented for this type of index") != std::string::npos) {
+				throw InvalidInputException("Unable to add data: This type of index does not support adding with IDs. "
+				                            "Consider prefixing the index string with IDMap when creating the index.");
+			}
+
+			throw InvalidInputException("Unable to add data: %s", exception.what());
 		}
 		entry.faiss_lock.get()->unlock();
 		return OperatorResultType::NEED_MORE_INPUT;
@@ -561,6 +573,11 @@ static OperatorFinalizeResultType AddFinaliseFunction(ExecutionContext &context,
 	// We will mark these as added already, so concurrent calls to
 	// AddFinaliseFunction already these are taken care of
 	entry.added = total_elements;
+
+	// This should reset if no data was added for some reason.
+	if (entry.custom_labels == TRUE && entry.index->ntotal == 0) {
+		entry_ptr.get()->custom_labels = UNDECIDED;
+	}
 
 	entry.add_lock.get()->unlock();
 
