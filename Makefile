@@ -43,6 +43,8 @@ prebuild:
 endif
 ifeq ($(findstring $(DUCKDB_PLATFORM), windows_amd64_mingw), windows_amd64_mingw)
 prebuild:
+	ls -la C:/
+	which gcc
 	cd faiss && git apply ../faiss.patch
 	cp C:/rtools42/x86_64-w64-mingw32.static.posix/bin/gcc.exe C:/rtools42/x86_64-w64-mingw32.static.posix/bin/x86_64-w64-mingw32-gcc.exe 
 	cp C:/rtools42/x86_64-w64-mingw32.static.posix/bin/g++.exe C:/rtools42/x86_64-w64-mingw32.static.posix/bin/x86_64-w64-mingw32-g++.exe 
