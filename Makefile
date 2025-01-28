@@ -41,7 +41,7 @@ prebuild:
 	cp vcpkg/triplets/x64-osx.cmake overlay_triplets/x64-osx.cmake
 	echo "set(VCPKG_PLATFORM_TOOLSET_VERSION 14.40)" >> overlay_triplets/x64-osx.cmake
 endif
-ifeq ($(findstring $(DUCKDB_PLATFORM), windows_amd64_rtools), windows_amd64_rtools)
+ifeq ($(findstring $(DUCKDB_PLATFORM), windows_amd64_mingw), windows_amd64_mingw)
 prebuild:
 	cd faiss && git apply ../faiss.patch
 	cp C:/rtools42/x86_64-w64-mingw32.static.posix/bin/gcc.exe C:/rtools42/x86_64-w64-mingw32.static.posix/bin/x86_64-w64-mingw32-gcc.exe 
