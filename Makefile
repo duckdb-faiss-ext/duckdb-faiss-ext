@@ -53,13 +53,7 @@ release: prebuild
 	mkdir -p build/release && \
 	cmake $(GENERATOR) ${BUILD_FLAGS} -DCMAKE_BUILD_TYPE=RelWithDebInfo -S ./duckdb/ -B build/release && \
 	cmake --build build/release --config RelWithDebInfo || true
-	cat /vcpkg/buildtrees/lapack-reference/config-x64-linux-dbg-CMakeCache.txt.log
-	cat /vcpkg/buildtrees/lapack-reference/config-x64-linux-rel-CMakeCache.txt.log
-	cat /vcpkg/buildtrees/lapack-reference/config-x64-linux-dbg-CMakeConfigureLog.yaml.log
-	cat /vcpkg/buildtrees/lapack-reference/config-x64-linux-rel-CMakeConfigureLog.yaml.log
-	cat /vcpkg/buildtrees/lapack-reference/config-x64-linux-out.log
-	cat /vcpkg/buildtrees/lapack-reference/config-x64-linux-err.log
-
+	ninja -v
 
 # reldebug isn't defined by the the duckdb extension template
 reldebug:
