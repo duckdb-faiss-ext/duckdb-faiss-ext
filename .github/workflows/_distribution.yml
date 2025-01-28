@@ -20,7 +20,7 @@ jobs:
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.1.3
     with:
       duckdb_version: main
-      ci_tools_version: main
+      ci_tools_version: 77fb3182fb2ead0ee77f0002f67e5ae8e5d67f31
       extension_name: faiss
       vcpkg_url: "https://github.com/jaicewizard/vcpkg.git"
       vcpkg_commit: bb9a822e61481d93df028e3075b1c2118f09b9a4
