@@ -53,7 +53,7 @@ release: prebuild
 	mkdir -p build/release && \
 	cmake $(GENERATOR) ${BUILD_FLAGS} -DCMAKE_BUILD_TYPE=RelWithDebInfo -S ./duckdb/ -B build/release && \
 	cmake --build build/release --config RelWithDebInfo || true
-	ninja -v
+	ninja --version
 
 # reldebug isn't defined by the the duckdb extension template
 reldebug:
