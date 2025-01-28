@@ -46,13 +46,20 @@ prebuild:
 	ls -la C:/
 	which gcc
 	cd faiss && git apply ../faiss.patch
-	cp C:/rtools44/x86_64-w64-mingw32.static.posix/bin/gcc.exe C:/rtools44/x86_64-w64-mingw32.static.posix/bin/x86_64-w64-mingw32-gcc.exe 
-	cp C:/rtools44/x86_64-w64-mingw32.static.posix/bin/g++.exe C:/rtools44/x86_64-w64-mingw32.static.posix/bin/x86_64-w64-mingw32-g++.exe 
-	cp C:/rtools44/x86_64-w64-mingw32.static.posix/bin/gfortran.exe C:/rtools44/x86_64-w64-mingw32.static.posix/bin/x86_64-w64-mingw32-gfortran.exe 
 endif
 endif
 
 release: prebuild
+	mkdir -p build/release && \
+	cmake $(GENERATOR) ${BUILD_FLAGS} -DCMAKE_BUILD_TYPE=RelWithDebInfo -S ./duckdb/ -B build/release && \
+	cmake --build build/release --config RelWithDebInfo
+	cat /vcpkg/buildtrees/lapack-reference/config-x64-linux-dbg-CMakeCache.txt.log
+	cat /vcpkg/buildtrees/lapack-reference/config-x64-linux-rel-CMakeCache.txt.log
+	cat /vcpkg/buildtrees/lapack-reference/config-x64-linux-dbg-CMakeConfigureLog.yaml.log
+	cat /vcpkg/buildtrees/lapack-reference/config-x64-linux-rel-CMakeConfigureLog.yaml.log
+	cat /vcpkg/buildtrees/lapack-reference/config-x64-linux-out.log
+	cat /vcpkg/buildtrees/lapack-reference/config-x64-linux-err.log
+
 
 # reldebug isn't defined by the the duckdb extension template
 reldebug:
