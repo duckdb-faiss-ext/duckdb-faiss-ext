@@ -19,11 +19,6 @@ prebuild:
 ifneq ($(DUCKDB_PLATFORM), )
 ifeq ($(findstring $(DUCKDB_PLATFORM), linux_amd64 linux_arm64), $(DUCKDB_PLATFORM))
 prebuild:
-	# linux should be fixed in 1.8.1 (https://github.com/facebookresearch/faiss/pull/3860)
-	cd faiss; git status -s; if [ -z "$(git status -s)" ]; then \
-		git apply ../faiss-linux.patch; \
-		git apply ../faiss-arm.patch; \
-	fi
 	sed -i '/cmake_minimum_required(VERSION 3.23.1 FATAL_ERROR)/c\\' faiss/CMakeLists.txt
 	touch prebuild # make sure this rule doesnt get run twice?
 endif
@@ -50,16 +45,6 @@ endif
 endif
 
 release: prebuild
-	mkdir -p build/release && \
-	cmake $(GENERATOR) ${BUILD_FLAGS} -DCMAKE_BUILD_TYPE=RelWithDebInfo -S ./duckdb/ -B build/release && \
-	cmake --build build/release --config RelWithDebInfo || true
-	ninja --version
-
-# reldebug isn't defined by the the duckdb extension template
-reldebug:
-	mkdir -p build/reldebug && \
-	cmake $(GENERATOR) ${BUILD_FLAGS} -DCMAKE_BUILD_TYPE=RelWithDebInfo -S ./duckdb/ -B build/reldebug && \
-	cmake --build build/reldebug --config RelWithDebInfo
 
 # Client tests
 DEBUG_EXT_PATH='$(PROJ_DIR)build/debug/extension/${EXT_NAME}/${EXT_NAME}.duckdb_extension'

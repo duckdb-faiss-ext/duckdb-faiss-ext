@@ -24,6 +24,6 @@ jobs:
       extension_name: faiss
       vcpkg_url: "https://github.com/jaicewizard/vcpkg.git"
       vcpkg_commit: bb9a822e61481d93df028e3075b1c2118f09b9a4
-      exclude_archs: "wasm_mvp;wasm_eh;wasm_threads"
+      exclude_archs: "wasm_mvp;wasm_eh;wasm_threads;linux_amd64_musl"
       build_duckdb_shell: false
       extra_toolchains: "fortran;omp"
