@@ -27,13 +27,3 @@ jobs:
       exclude_archs: "wasm_mvp;wasm_eh;wasm_threads"
       build_duckdb_shell: false
       extra_toolchains: "fortran;omp"
-
-      #  duckdb-stable-deploy:
-      #    name: Deploy extension binaries
-      #    needs: duckdb-stable-build
-      #    uses: ./.github/workflows/_extension_deploy.yml
-      #    secrets: inherit
-      #    with:
-      #      duckdb_version: v0.10.1
-      #      extension_name: quack
-      #      deploy_latest: ${{ startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' }}
