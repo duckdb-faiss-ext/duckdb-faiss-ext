@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.13)
+cmake_minimum_required(VERSION 3.16)
 
 set(TARGET_NAME faiss)
 set(EXTENSION_NAME ${TARGET_NAME}_extension)
@@ -19,6 +19,11 @@ include_directories(faiss/)
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
 build_loadable_extension(${TARGET_NAME} "" ${EXTENSION_SOURCES})
 
+# This may hinder building for host, but it seems to work??
+if("${VCPKG_TARGET_TRIPLET}" STREQUAL "arm64-linux-release")
+  set(CMAKE_FIND_USE_CMAKE_SYSTEM_PATH FALSE)
+  set(CMAKE_SYSTEM_PROCESSOR "aarch64")
+endif()
 set(FIND_LIBRARY_USE_LIB64_PATHS TRUE)
 
 # link libraries
