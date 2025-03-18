@@ -19,8 +19,24 @@ prebuild:
 ifneq ($(DUCKDB_PLATFORM), )
 ifeq ($(findstring $(DUCKDB_PLATFORM), linux_amd64 linux_arm64), $(DUCKDB_PLATFORM))
 prebuild:
+	touch prebuild
 	sed -i '/cmake_minimum_required(VERSION 3.23.1 FATAL_ERROR)/c\\' faiss/CMakeLists.txt
-	touch prebuild # make sure this rule doesnt get run twice?
+	wget -qO - https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/7fa2af80.pub | apt-key add -
+	wget -qO - https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/3bf863cc.pub | apt-key add -
+	bash -c 'echo "deb http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/cross-linux-sbsa /" >> /etc/apt/sources.list.d/cuda.list'
+	bash -c 'echo "deb http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64 /" >> /etc/apt/sources.list.d/cuda.list'
+	apt-get update
+	DEBIAN_FRONTEND=noninteractive apt-get install -y -qq cuda-11-6 cuda-compiler-11.6 cuda-cross-sbsa-11-6
+	cd faiss && git apply ../faiss-gpu.patch
+else
+ifeq ($(findstring $(DUCKDB_PLATFORM), linux_amd64_gcc4), $(DUCKDB_PLATFORM))
+prebuild:
+	yum -y install wget
+	yum-config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel7/x86_64/cuda-rhel7.repo
+#	ubuntu 18.04 sbsa doesn't support cuda versions above this
+	yum -y install cuda-11-6 cuda-compiler-11-6
+	cd faiss && git apply ../faiss-gpu.patch
+endif
 endif
 ifeq ($(findstring $(DUCKDB_PLATFORM), osx_amd64 osx_arm64), $(DUCKDB_PLATFORM))
 export VCPKG_OVERLAY_TRIPLETS=$(pwd)"/overlay_triplets"
@@ -39,7 +55,6 @@ endif
 ifeq ($(findstring $(DUCKDB_PLATFORM), windows_amd64_mingw), windows_amd64_mingw)
 prebuild:
 	ls -la C:/
-	which gcc
 	cd faiss && git apply ../faiss.patch
 endif
 endif

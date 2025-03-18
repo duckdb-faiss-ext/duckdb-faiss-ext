@@ -1,0 +1,13 @@
+diff --git a/faiss/gpu/CMakeLists.txt b/faiss/gpu/CMakeLists.txt
+index b84362266..777d724ba 100644
+--- a/faiss/gpu/CMakeLists.txt
++++ b/faiss/gpu/CMakeLists.txt
+@@ -333,7 +333,7 @@ else()
+   target_link_options(faiss_gpu PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/fatbin.ld")
+ 
+   find_package(CUDAToolkit REQUIRED)
+-  target_link_libraries(faiss_gpu PRIVATE CUDA::cudart CUDA::cublas
++  target_link_libraries(faiss_gpu PRIVATE CUDA::cudart_static CUDA::cublas_static
+     $<$<BOOL:${FAISS_ENABLE_RAFT}>:raft::raft>
+     $<$<BOOL:${FAISS_ENABLE_RAFT}>:raft::compiled>
+     $<$<BOOL:${FAISS_ENABLE_RAFT}>:nvidia::cutlass::cutlass>
