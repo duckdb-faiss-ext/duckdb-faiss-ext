@@ -17,13 +17,15 @@ concurrency:
 jobs:
   duckdb-stable-build:
     name: Build extension binaries
-    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@main
+    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@77fb3182fb2ead0ee77f0002f67e5ae8e5d67f31
     with:
-      duckdb_version: main
-      ci_tools_version: main
+      duckdb_version: v1.2.1
+      ci_tools_version: 77fb3182fb2ead0ee77f0002f67e5ae8e5d67f31
       extension_name: faiss
       vcpkg_url: "https://github.com/jaicewizard/vcpkg.git"
       vcpkg_commit: bb9a822e61481d93df028e3075b1c2118f09b9a4
-      exclude_archs: "wasm_mvp;wasm_eh;wasm_threads;linux_amd64_musl"
+      # OSX amd64 is disabled due to https://github.com/duckdb/extension-ci-tools/issues/158
+      # musl is disabled due to https://github.com/duckdb/extension-ci-tools/issues/135
+      exclude_archs: "osx_amd64;wasm_mvp;wasm_eh;wasm_threads;linux_amd64_musl"
       build_duckdb_shell: false
       extra_toolchains: "fortran;omp"

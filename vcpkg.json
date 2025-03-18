@@ -1,5 +1,5 @@
 {
-    "dependencies": [
+	"dependencies": [
 		"blas",
 		{
 			"name": "openblas",
@@ -8,8 +8,10 @@
 		"lapack",
 		{
 			"name": "lapack-reference",
-			"features": ["cblas"],
+			"features": [
+				"cblas"
+			],
 			"platform": "(windows & !mingw) & static"
 		}
-    ]
+	]
 }
