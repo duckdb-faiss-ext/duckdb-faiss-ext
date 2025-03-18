@@ -24,11 +24,10 @@ ifeq ($(findstring $(DUCKDB_PLATFORM), linux_amd64 linux_arm64), $(DUCKDB_PLATFO
 ifeq ($(findstring $(DUCKDB_PLATFORM), linux_amd64), $(DUCKDB_PLATFORM))
 EXT_RELEASE_FLAGS:=-DCMAKE_CUDA_COMPILER=/usr/local/cuda-11.6/bin/nvcc
 else
-EXT_RELEASE_FLAGS:=-DCMAKE_CUDA_COMPILER=/usr/local/cuda-11.6/bin/nvcc -DCMAKE_CUDA_HOST_COMPILER=aarch64-linux-gnu-g++
+EXT_RELEASE_FLAGS:=-DCMAKE_CUDA_COMPILER=/usr/local/cuda-11.6/bin/nvcc -DCMAKE_CUDA_HOST_COMPILER=aarch64-linux-gnu-g++ -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=aarch64 -DCMAKE_SYSTEM_LIBRARY_PATH=/usr/aarch64-linux-gnu/lib
 endif
 
 prebuild:
-	touch prebuild
 	sed -i '/cmake_minimum_required(VERSION 3.23.1 FATAL_ERROR)/c\\' faiss/CMakeLists.txt
 	wget -qO - https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/7fa2af80.pub | apt-key add -
 	wget -qO - https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/3bf863cc.pub | apt-key add -
@@ -39,13 +38,14 @@ prebuild:
 	cd faiss && git apply ../faiss-gpu.patch
 else
 ifeq ($(findstring $(DUCKDB_PLATFORM), linux_amd64_gcc4), $(DUCKDB_PLATFORM))
-EXT_RELEASE_FLAGS:=-DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.1/bin/nvcc
+EXT_RELEASE_FLAGS:=-DCMAKE_CUDA_COMPILER=/usr/local/cuda-11.6/bin/nvcc
 prebuild:
 	yum -y install wget
 	yum-config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel7/x86_64/cuda-rhel7.repo
 #	ubuntu 18.04 sbsa doesn't support cuda versions above this
 	yum -y install cuda-11-6 cuda-compiler-11-6
 	cd faiss && git apply ../faiss-gpu.patch
+	cd duckdb && git apply ../duckdb_gcc4.patch
 endif
 endif
 ifeq ($(findstring $(DUCKDB_PLATFORM), osx_amd64 osx_arm64), $(DUCKDB_PLATFORM))

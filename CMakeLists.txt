@@ -19,16 +19,14 @@ include_directories(faiss/)
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
 build_loadable_extension(${TARGET_NAME} "" ${EXTENSION_SOURCES})
 
-# This may hinder building for host, but it seems to work??
-if("${VCPKG_TARGET_TRIPLET}" STREQUAL "arm64-linux-release")
-  set(CMAKE_FIND_USE_CMAKE_SYSTEM_PATH FALSE)
-  set(CMAKE_SYSTEM_PROCESSOR "aarch64")
-endif()
 set(FIND_LIBRARY_USE_LIB64_PATHS TRUE)
 
 # link libraries
 set(FAISS_ENABLE_PYTHON OFF)
 set(FAISS_ENABLE_GPU OFF)
+if(UNIX AND NOT APPLE)
+  set(FAISS_ENABLE_GPU ON)
+endif()
 set(BUILD_TESTING OFF)
 add_subdirectory(faiss)
 
