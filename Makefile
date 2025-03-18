@@ -11,6 +11,8 @@ PROJ_DIR := $(dir $(MKFILE_PATH))
 EXT_NAME=faiss
 EXT_NAME_UPPER=FAISS
 EXT_CONFIG=${PROJ_DIR}extension_config.cmake
+EXT_RELEASE_FLAGS=""
+
 include extension-ci-tools/makefiles/duckdb_extension.Makefile
 
 
@@ -18,6 +20,13 @@ prebuild:
 
 ifneq ($(DUCKDB_PLATFORM), )
 ifeq ($(findstring $(DUCKDB_PLATFORM), linux_amd64 linux_arm64), $(DUCKDB_PLATFORM))
+
+ifeq ($(findstring $(DUCKDB_PLATFORM), linux_amd64), $(DUCKDB_PLATFORM))
+EXT_RELEASE_FLAGS:=-DCMAKE_CUDA_COMPILER=/usr/local/cuda-11.6/bin/nvcc
+else
+EXT_RELEASE_FLAGS:=-DCMAKE_CUDA_COMPILER=/usr/local/cuda-11.6/bin/nvcc -DCMAKE_CUDA_HOST_COMPILER=aarch64-linux-gnu-g++
+endif
+
 prebuild:
 	touch prebuild
 	sed -i '/cmake_minimum_required(VERSION 3.23.1 FATAL_ERROR)/c\\' faiss/CMakeLists.txt
@@ -30,6 +39,7 @@ prebuild:
 	cd faiss && git apply ../faiss-gpu.patch
 else
 ifeq ($(findstring $(DUCKDB_PLATFORM), linux_amd64_gcc4), $(DUCKDB_PLATFORM))
+EXT_RELEASE_FLAGS:=-DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.1/bin/nvcc
 prebuild:
 	yum -y install wget
 	yum-config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel7/x86_64/cuda-rhel7.repo
