@@ -1,5 +1,5 @@
 diff --git a/faiss/impl/platform_macros.h b/faiss/impl/platform_macros.h
-index 3fc328535..6a7b47bbc 100644
+index 2aecc5122..534f45463 100644
 --- a/faiss/impl/platform_macros.h
 +++ b/faiss/impl/platform_macros.h
 @@ -11,7 +11,7 @@
@@ -73,7 +73,7 @@ index 3fc328535..6a7b47bbc 100644
  #define FAISS_ALWAYS_INLINE __attribute__((always_inline)) inline
  
  #endif
-@@ -173,6 +133,54 @@ inline int __builtin_clzll(uint64_t x) {
+@@ -165,3 +125,51 @@ inline int __builtin_clzll(uint64_t x) {
  #endif
  
  // clang-format on
@@ -125,9 +125,6 @@ index 3fc328535..6a7b47bbc 100644
 +
 +#define ALIGNED(x) __attribute__((aligned(x)))
 +#endif
- 
- /*******************************************************
-  * BIGENDIAN specific macros
 diff --git a/faiss/invlists/InvertedListsIOHook.cpp b/faiss/invlists/InvertedListsIOHook.cpp
 index 0081c4f9a..2c3a60067 100644
 --- a/faiss/invlists/InvertedListsIOHook.cpp
