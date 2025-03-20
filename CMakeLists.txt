@@ -10,24 +10,34 @@ file(
   GLOB
   EXTENSION_SOURCES
   src/*.cpp)
+file(
+  GLOB
+  EXTENSION_GPU_SOURCES
+  src/gpu/*.cpp)
 
 set(EXTENSION_SOURCES ${EXTENSION_SOURCES})
+set(EXTENSION_GPU_SOURCES ${EXTENSION_GPU_SOURCES})
 
 include_directories(src/include)
 include_directories(faiss/)
+
 # create extension targets
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
 build_loadable_extension(${TARGET_NAME} "" ${EXTENSION_SOURCES})
 
 set(FIND_LIBRARY_USE_LIB64_PATHS TRUE)
 
-# link libraries
+# configure faiss
 set(FAISS_ENABLE_PYTHON OFF)
 set(FAISS_ENABLE_GPU OFF)
 if(UNIX AND NOT APPLE)
   set(FAISS_ENABLE_GPU ON)
+  add_compile_definitions(ENABLE_GPU)
+  set(EXTENSION_SOURCES ${EXTENSION_SOURCES} ${EXTENSION_GPU_SOURCES})
 endif()
 set(BUILD_TESTING OFF)
+
+# link libraries
 add_subdirectory(faiss)
 
 if(UNIX AND NOT APPLE)

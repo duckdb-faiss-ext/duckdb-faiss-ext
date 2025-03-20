@@ -964,14 +964,14 @@ static void LoadInternal(DatabaseInstance &instance) {
 		CreateTableFunctionInfo create_info(create_func);
 		catalog.CreateTableFunction(*con.context, &create_info);
 	}
-
+#ifdef DDBF_ENABLE_GPU
 	{
 		TableFunction create_func("faiss_to_gpu", {LogicalType::VARCHAR, LogicalType::INTEGER}, MoveToGPUFunction,
 		                          MoveToGPUBind);
 		CreateTableFunctionInfo create_info(create_func);
 		catalog.CreateTableFunction(*con.context, &create_info);
 	}
-
+#endif
 	{
 		TableFunction save_function("faiss_save", {LogicalType::VARCHAR, LogicalType::VARCHAR}, SaveFunction, SaveBind);
 		CreateTableFunctionInfo add_info(save_function);

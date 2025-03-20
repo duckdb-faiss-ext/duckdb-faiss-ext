@@ -14,8 +14,8 @@ struct MoveToGPUDate : public TableFunctionData {
 	int device;
 };
 
-static unique_ptr<FunctionData> MoveToGPUBind(ClientContext &, TableFunctionBindInput &input,
-                                              vector<LogicalType> &return_types, vector<string> &names) {
+unique_ptr<FunctionData> MoveToGPUBind(ClientContext &, TableFunctionBindInput &input,
+                                       vector<LogicalType> &return_types, vector<string> &names) {
 	auto result = make_uniq<MoveToGPUDate>();
 	return_types.emplace_back(LogicalType::BOOLEAN);
 	names.emplace_back("Success");
@@ -30,7 +30,7 @@ static unique_ptr<FunctionData> MoveToGPUBind(ClientContext &, TableFunctionBind
 	return std::move(result);
 }
 
-static void MoveToGPUFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &) {
+void MoveToGPUFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &) {
 	auto &bind_data = data_p.bind_data->Cast<MoveToGPUDate>();
 	auto &object_cache = ObjectCache::GetObjectCache(context);
 
