@@ -42,20 +42,23 @@ void MoveToGPUFunction(ClientContext &context, TableFunctionInput &data_p, DataC
 	auto &entry = *entry_ptr;
 	faiss::Index *index = &*entry.index;
 	faiss::gpu::StandardGpuResources gpu_resources = faiss::gpu::StandardGpuResources();
+	entry.faiss_lock.get()->lock();
 	try {
-		entry.faiss_lock.get()->lock();
 		entry.index = unique_ptr<faiss::Index>(faiss::gpu::index_cpu_to_gpu(&gpu_resources, bind_data.device, index));
-		entry.faiss_lock.get()->unlock();
 	} catch (faiss::FaissException exception) {
+		entry.faiss_lock.get()->unlock();
 		std::string msg = exception.msg;
 		if (msg.find("This index type is not implemented") != std::string::npos) {
 			throw InvalidInputException(
 			    "The index type of %s is not supported on the GPU, please consider using a different index",
 			    bind_data.key);
+		} else if (msg.find("Invalid GPU device") != std::string::npos) {
+			throw InvalidInputException("Invalid GPU index: %s", bind_data.key);
 		} else {
 			throw InvalidInputException("Error occured while training index: %s", msg);
 		}
 	}
+	entry.faiss_lock.get()->unlock();
 }
 
 } // namespace duckdb
