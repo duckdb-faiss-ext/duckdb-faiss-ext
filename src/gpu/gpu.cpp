@@ -43,7 +43,9 @@ void MoveToGPUFunction(ClientContext &context, TableFunctionInput &data_p, DataC
 	faiss::Index *index = &*entry.index;
 	faiss::gpu::StandardGpuResources gpu_resources = faiss::gpu::StandardGpuResources();
 	try {
+		entry.faiss_lock.get()->lock();
 		entry.index = unique_ptr<faiss::Index>(faiss::gpu::index_cpu_to_gpu(&gpu_resources, bind_data.device, index));
+		entry.faiss_lock.get()->unlock();
 	} catch (faiss::FaissException exception) {
 		std::string msg = exception.msg;
 		if (msg.find("This index type is not implemented") != std::string::npos) {

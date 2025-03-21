@@ -348,6 +348,7 @@ static OperatorFinalizeResultType MTrainFinaliseFunction(ExecutionContext &conte
 	try {
 		entry.index->train((faiss::idx_t)state.add_data.size() / entry.index->d, &state.add_data[0]);
 	} catch (faiss::FaissException exception) {
+		entry.faiss_lock.get()->unlock();
 		std::string msg = exception.msg;
 		if (msg.find("should be at least as large as number of clusters") != std::string::npos) {
 			throw InvalidInputException(
@@ -464,12 +465,13 @@ static OperatorResultType AddFunction(ExecutionContext &context, TableFunctionIn
 				entry.index->add((faiss::idx_t)input.size(), child_ptr);
 			}
 		} catch (faiss::FaissException exception) {
+			entry.faiss_lock.get()->unlock();
+
 			// This should reset if no data was added for some reason.
 			if (entry.custom_labels == TRUE && entry.index->ntotal == 0) {
 				entry_ptr.get()->custom_labels = UNDECIDED;
 			}
 
-			entry.faiss_lock.get()->unlock();
 			std::string msg = exception.msg;
 			if (msg.find("add_with_ids not implemented for this type of index") != std::string::npos) {
 				throw InvalidInputException("Unable to add data: This type of index does not support adding with IDs. "
@@ -538,6 +540,7 @@ static OperatorFinalizeResultType AddFinaliseFunction(ExecutionContext &context,
 	try {
 		entry.index->train((faiss::idx_t)total_elements, &entry.add_data[0]);
 	} catch (faiss::FaissException exception) {
+		entry.faiss_lock.get()->unlock();
 		std::string msg = exception.msg;
 		if (msg.find("should be at least as large as number of clusters") != std::string::npos) {
 			throw InvalidInputException(
@@ -576,7 +579,14 @@ void searchIntoVector(ClientContext &ctx, IndexEntry &entry, Vector inputdata, s
 	unique_ptr<float[]> distances = unique_ptr<float[]>(new float[nQueries * nResults]);
 
 	entry.faiss_lock.get()->lock(); //  this should be a readlock once c++17 is supported
-	entry.index->search((faiss::idx_t)nQueries, child_ptr, nResults, distances.get(), labels.get(), searchParams);
+	try {
+		entry.index->search((faiss::idx_t)nQueries, child_ptr, nResults, distances.get(), labels.get(), searchParams);
+	} catch (faiss::FaissException exception) {
+		entry.faiss_lock.get()->unlock();
+		std::string msg = exception.msg;
+		throw InvalidInputException("Error occured while searching: %s", msg);
+	}
+
 	entry.faiss_lock.get()->unlock();
 
 	ListVector::SetListSize(output, nQueries * nResults);
@@ -636,6 +646,12 @@ vector<shared_ptr<faiss::SearchParameters>> innerCreateSearchParameters(faiss::I
 			searchParams->efSearch = std::stoi(efSearch);
 		}
 
+		return vector<shared_ptr<faiss::SearchParameters>>(1, searchParams);
+	}
+
+	void *pq = dynamic_cast<faiss::IndexPQ *>(index);
+	if (pq) {
+		shared_ptr<faiss::SearchParametersPQ> searchParams = make_shared_ptr<faiss::SearchParametersPQ>();
 		return vector<shared_ptr<faiss::SearchParameters>>(1, searchParams);
 	}
 
