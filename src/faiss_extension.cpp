@@ -552,8 +552,8 @@ static OperatorFinalizeResultType AddFinaliseFunction(ExecutionContext &context,
 	// We only add data that havn't been added yet, so we skip the data already added
 	faiss::idx_t new_element_count = total_elements - added_elements;
 	float *new_vector_data = &entry.add_data[added_elements * entry.index->d];
-	faiss::idx_t *new_label_data = &entry.add_labels[added_elements];
 	if (entry.custom_labels == TRUE) {
+		faiss::idx_t *new_label_data = &entry.add_labels[added_elements];
 		entry.index->add_with_ids(new_element_count, new_vector_data, new_label_data);
 	} else {
 		entry.index->add(new_element_count, new_vector_data);
