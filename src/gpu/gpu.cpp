@@ -2,6 +2,7 @@
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/storage/object_cache.hpp"
 #include "faiss/gpu/GpuCloner.h"
+#include "faiss/gpu/GpuIndexIVF.h"
 #include "faiss/gpu/StandardGpuResources.h"
 #include "index.hpp"
 
@@ -59,6 +60,19 @@ void MoveToGPUFunction(ClientContext &context, TableFunctionInput &data_p, DataC
 		}
 	}
 	entry.faiss_lock.get()->unlock();
+}
+vector<shared_ptr<faiss::SearchParameters>> innerCreateSearchParametersGPU(faiss::Index *index,
+                                                                           faiss::IDSelector *selector,
+                                                                           Vector *userParams, uint64_t paramCount,
+                                                                           string prefix) {
+
+	void *ivf = dynamic_cast<faiss::gpu::GpuIndexIVF *>(index);
+	if (ivf) {
+		shared_ptr<faiss::SearchParametersIVF> searchParams = make_shared_ptr<faiss::SearchParametersIVF>();
+		return vector<shared_ptr<faiss::SearchParameters>>(1, searchParams);
+	}
+
+	return vector<shared_ptr<faiss::SearchParameters>>(0);
 }
 
 } // namespace duckdb

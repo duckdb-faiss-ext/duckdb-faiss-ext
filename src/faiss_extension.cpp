@@ -655,6 +655,14 @@ vector<shared_ptr<faiss::SearchParameters>> innerCreateSearchParameters(faiss::I
 		return vector<shared_ptr<faiss::SearchParameters>>(1, searchParams);
 	}
 
+#ifdef DDBF_ENABLE_GPU
+	vector<shared_ptr<faiss::SearchParameters>> gpuparams =
+	    innerCreateSearchParametersGPU(index, selector, userParams, paramCount, prefix);
+	if (gpuparams.size() != 0) {
+		return gpuparams;
+	}
+#endif
+
 	shared_ptr<faiss::SearchParameters> searchParams = make_shared_ptr<faiss::SearchParameters>();
 	searchParams->sel = selector;
 	return vector<shared_ptr<faiss::SearchParameters>>(1, searchParams);
