@@ -21,21 +21,21 @@ set(EXTENSION_GPU_SOURCES ${EXTENSION_GPU_SOURCES})
 include_directories(src/include)
 include_directories(faiss/)
 
-# create extension targets
-build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
-build_loadable_extension(${TARGET_NAME} "" ${EXTENSION_SOURCES})
-
 set(FIND_LIBRARY_USE_LIB64_PATHS TRUE)
 
-# configure faiss
+# configure
 set(FAISS_ENABLE_PYTHON OFF)
 set(FAISS_ENABLE_GPU OFF)
 if(UNIX AND NOT APPLE)
   set(FAISS_ENABLE_GPU ON)
-  add_compile_definitions(ENABLE_GPU)
+  add_compile_definitions(DDBF_ENABLE_GPU)
   set(EXTENSION_SOURCES ${EXTENSION_SOURCES} ${EXTENSION_GPU_SOURCES})
 endif()
 set(BUILD_TESTING OFF)
+
+# create extension targets
+build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
+build_loadable_extension(${TARGET_NAME} "" ${EXTENSION_SOURCES})
 
 # link libraries
 add_subdirectory(faiss)
