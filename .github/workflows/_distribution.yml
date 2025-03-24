@@ -23,7 +23,7 @@ jobs:
       ci_tools_version: 00e6af068429bf776a54f67cb1cd1ff5370a8dd7
       extension_name: faiss
       vcpkg_url: "https://github.com/jaicewizard/vcpkg.git"
-      vcpkg_commit: 7417f4d9d4fbb2b6df19967328b69c77d5e18512
+      vcpkg_commit: 2fb35e52264e975a746ad3e88974c50e39c6344c
       # OSX amd64 is disabled due to https://github.com/duckdb/extension-ci-tools/issues/158
       # musl is disabled due to https://github.com/duckdb/extension-ci-tools/issues/135
       exclude_archs: "osx_amd64;wasm_mvp;wasm_eh;wasm_threads;linux_amd64_musl"
