@@ -28,7 +28,6 @@ EXT_RELEASE_FLAGS:=-DCMAKE_CUDA_COMPILER=/usr/local/cuda-11.6/bin/nvcc -DCMAKE_C
 endif
 
 prebuild:
-	sed -i '/cmake_minimum_required(VERSION 3.23.1 FATAL_ERROR)/c\\' faiss/CMakeLists.txt
 	wget -qO - https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/7fa2af80.pub | apt-key add -
 	wget -qO - https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/3bf863cc.pub | apt-key add -
 	bash -c 'echo "deb http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/cross-linux-sbsa /" >> /etc/apt/sources.list.d/cuda.list'
@@ -55,16 +54,8 @@ prebuild:
 	cp vcpkg/triplets/x64-osx.cmake overlay_triplets/x64-osx.cmake
 	echo "set(VCPKG_OSX_DEPLOYMENT_TARGET 11.0)" >> overlay_triplets/x64-osx.cmake
 endif
-ifeq ($(findstring $(DUCKDB_PLATFORM), windows_amd64), $(DUCKDB_PLATFORM))
-export VCPKG_OVERLAY_TRIPLETS=$(pwd)"/overlay_triplets"
-prebuild:
-	mkdir -p overlay_triplets
-	cp vcpkg/triplets/x64-osx.cmake overlay_triplets/x64-osx.cmake
-	echo "set(VCPKG_PLATFORM_TOOLSET_VERSION 14.40)" >> overlay_triplets/x64-osx.cmake
-endif
 ifeq ($(findstring $(DUCKDB_PLATFORM), windows_amd64_mingw), windows_amd64_mingw)
 prebuild:
-	ls -la C:/
 	cd faiss && git apply ../faiss.patch
 endif
 endif
