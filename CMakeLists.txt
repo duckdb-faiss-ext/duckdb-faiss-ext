@@ -1,4 +1,8 @@
-cmake_minimum_required(VERSION 3.16)
+if(UNIX AND NOT APPLE)
+  cmake_minimum_required(VERSION 3.29)
+else()
+  cmake_minimum_required(VERSION 3.16)
+endif()
 
 set(TARGET_NAME faiss)
 set(EXTENSION_NAME ${TARGET_NAME}_extension)
