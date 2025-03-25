@@ -16,9 +16,9 @@ If at any point you update duckdb, you have to install the extension again.
 
 This extension can also be compiled yourself, see [Building the extension](#Building-the-extension).
 
-### Macos
+### MacOS
 
-If you are on Macos, you will need to install openmp runtime libraries. This can be done via brew:
+If you are on MacOS, you will need to install OpenMP runtime libraries. This can be done via brew:
 
 ```
 brew install libomp
@@ -49,7 +49,7 @@ https://github.com/facebookresearch/faiss/wiki/Faiss-indexes
 
 ## Example
 
-Here is one example, using random data. You can play with the dimensionality, number of datapoints, number of queries, and the faiss index type.
+Here is one example, using random data (not a good idea in high dimensions btw). You can play with the dimensionality, number of datapoints, number of queries, and the faiss index type.
 If you want to modify add parameters as well, check out how to use the `_param` variants below. 
 
 ```sql
@@ -73,27 +73,28 @@ SELECT id, UNNEST(FAISS_SEARCH('name', 10, data)) FROM queries;
 
 # Benchmarks
 
-The initial thesis this was written for, can be found [here](https://www.cs.ru.nl/bachelors-theses/2024/Jaap_Aarts___1056714___Implementing_in-Database_Similarity_Search.pdf). This contains benchmarks of all 3 methods implemented in this extension, for 3 different indexes, 2 IFV and one HNSW on page 26-28. This also has one comparison against the vss extension for duckdb, however this is outdated and only includes a small amount of data. The methodology section also provides the setup and details on the benchmarks.
+The initial thesis this was written for, can be found [here](https://www.cs.ru.nl/bachelors-theses/2024/Jaap_Aarts___1056714___Implementing_in-Database_Similarity_Search.pdf). The thesis evaluates benchmarks of all 3 methods implemented in this extension, for 3 different indexes (HNSW and 2 variants of IFV, on page 26-28). The report also presents a comparison against DuckDB's VSS extension, however the comparison is outdated and only includes a small amount of data due to previous limitations of VSS. The methodology section introduces the setup and details of these benchmarks.
 
-There are also benchmarks directly against vss, these use the same methodology as the thesis above. Here is the graph of VSS vs FAISS vs SQL:
+Additional (newer) experiments have compared VSS directly against FAISS, using the methodology introduced in the thesis above. Here is the graph of VSS vs FAISS vs SQL:
 
 ![Comparison against vss](plots/vss.png)
 
-The batch size is 1, since VSS doesn't support batches (yet). The number of results are computed based on the passingrate, setting the binomial(P) CDF to 99.
+The VSS extension only supports a query batch size of 1; the number of results is computed based on the passingrate, setting up a binomial(P) CDF to 99.
 
 Note that this is a Logarithmic scale, since otherwise the only thing you could see would be one SQL line and one VSS/FAISS line.
-As you can see faiss is significantly faster using single-query batch queries (since vss doesn't support batch operations).
+As you can see FAISS is significantly faster, even if we use only single-query batches. 
 
-It is important to note that faiss can to batch operations, and is heavily optimised for it. For example, using a batch of 48 queries is only 25% slower than a single query batch. (not included in this graph).
+FAISS has been optimised heavily for batches with multiple queries. For example, searching for a batch of 48 queries is only 25% slower than a single query. (Results not shown here.)
 
 # Functions
 
-The faiss extension provides several functions that can be used to interact with faiss. These are split into a couple general catagories: Creation/deletion, adding, and searching.
-You can see the all these functions below
+The FAISS extension provides several functions that can be used to interact with FAISS indexes. 
+
+An overview of functions provided has been grouped into thee following categories: Creation/deletion, Addition, and, Search.
 
 ## Creation/Deletion
 
-These functions allow you to do all kinds of things with indexes, without modifying the data.
+These functions manipulate indexes, without modifying the data.
 
 ### faiss\_create
 
@@ -101,7 +102,7 @@ These functions allow you to do all kinds of things with indexes, without modify
 CALL faiss_create(string name, int dimension, string index_type);
 ```
 
- - `name`: The name given to the index. Each database can only have a single index per name, this function will crash when you give it a name with an index already attached. These are global, and can be refered to back later.
+ - `name`: The name given to the index. Each database can only have a single index per name; and it will crash when you give it a name with an index already attached. These indexes are global, and can be refered to by their name for subsequent operations.
  - `dimension`: The dimensionality of the data.
  - `index_type`: The index type given to [the faiss index factory](https://github.com/facebookresearch/faiss/wiki/The-index-factory). 
 
@@ -111,10 +112,10 @@ CALL faiss_create(string name, int dimension, string index_type);
 CALL faiss_create_params(string name, int dimension, string index_type, MAP<string, string> parameters);
 ```
 
- - `name`: The name given to the index. Each database can only have a single index per name, this function will crash when you give it a name with an index already attached. These are global, and can be refered to back later.
+ - `name`: The name given to the index. Each database can only have a single index per name; the function will crash when you give it a name with an index already attached. These indexes are global, and can be refered to by their name for subsequent operations.
  - `dimension`: The dimensionality of the data.
  - `index_type`: The index type given to [the faiss index factory](https://github.com/facebookresearch/faiss/wiki/The-index-factory). 
- - `parameters`: The parameters of the index. For example passing `{'efConstruction': '1000'}` when creating an `HNSW` index, will set the efConstruction field to 1000. This is recursive, for example, when using an `IVF` with `HNSW`, `ivf.efConstruction` can be used to set the `efConstruction` value on the `HNSW` index. Note that currently, the implementation is verry limmited. Recursion is only implemented for `IDMap`, and only `efConstruction` is implemented for HNSW. Other than that, no other parameters are implemented. This is because I did not need these for my thesis, but should be easy to add.
+ - `parameters`: The parameters of the index. For example passing `{'efConstruction': '1000'}` when creating an `HNSW` index, will set the efConstruction field to 1000. This is recursive, for example, when using an `IVF` with `HNSW`, `ivf.efConstruction` can be used to set the `efConstruction` value on the `HNSW` index. Note that currently, the implementation is verry limmited. Recursion is only implemented for `IDMap`, and only `efConstruction` is implemented for HNSW. No other parameters have been implemented yet, but these should be easy to add.
 
 ### faiss\_save
 
@@ -125,19 +126,19 @@ CALL faiss_save(string name, string path);
  - `name`: The name of the index to be saves.
  - `path`: The target path to be saved to.
 
-Note that saving/loading an index, may remove the ability to add data to it or train it. Only if the index is still untrained, it it not mutable. This is because if the index is trained, we do not know the training data. In the future this restriction might be eliminated when using the manual train function.
+Note that saving/loading an index may remove the ability to add data to it or to train it. Only untrained indexes are mutable. (This is the case, because after the index is trained, we no longer know the training data.) This restriction might be eliminated in the future, when using the manual train function.
 
 
 ### faiss\_load
 
 ```sql
-CALL faiss_save(string name, string path);
+CALL faiss_load(string name, string path);
 ```
 
  - `name`: The name given to the loaded index
  - `path`: The location of the index to be read.
 
-Note that saving/loading an index, may remove the ability to add data to it or train it. Only if the index is still untrained, it it not mutable. This is because if the index is trained, we do not know the training data. In the future this restriction might be eliminated when using the manual train function.
+Note that saving/loading an index may remove the ability to add data to it or to train it. Only untrained indexes are mutable. (This is the case, because after the index is trained, we no longer know the training data.) This restriction might be eliminated in the future, when using the manual train function.
 
 ### faiss\_destroy
 
@@ -158,7 +159,7 @@ CALL faiss_add(TABLE data, string name);
  - `data`: A table with one or 2 columns. If there is only one column, this is the data column, and ids are creatd by faiss if possible. If there are 2 columns, the first is the id column of an integer type, and the second column is the data column. The data column most be a list of length equal to the index dimension
  - `name`: The name of the index that should be added to.
 
-`faiss_add` always retrains the index, and keeps a copy of all the data for later retraining, unless previously trained with `faiss_manual_train`. If retraining in undesired, or if memory usage is important, use `faiss_manual_train` for more control over training.
+`faiss_add` retrains the index and keeps a copy of all the data for later retraining, unless previously trained with `faiss_manual_train`. If retraining is not desired or memory is limited, use `faiss_manual_train` for more control over training.
 
 ### faiss\_manual\_train
 
@@ -169,7 +170,7 @@ CALL faiss_manual_train(TABLE data, string name);
  - `data`: A table with a single column. The type of this column must be a list of length equal to the index dimension.
  - `name`: The name of the index that should be added to.
 
-`faiss_manual_train` trains the index, and flags this index to be manually trained. This means that calls to `faiss_add` will not train the index, and do not store copies of the data. This saves on retraining when adding later, and a lot of memory for larger indices.
+`faiss_manual_train` trains the index manually, and flags it as having been. Subsequent calls to `faiss_add` will not further train the index, and do not store copies of the data; saving on retraining when adding new data later, and reducing the memory requirements for indexes over larger datasets.
 
 ## Searching and filtering
 
@@ -183,16 +184,15 @@ CALL faiss_search(string name, integer k, List q);
  - `k`: The amount of results to be returned.
  - `q`: The query vector for which the nearest neighbors should be computer.
 
-And a variant with parameters:
+And, a variant with parameters:
 
 ```sql
 CALL faiss_search(string name, integer k, List q, MAP<string, string> parameters);
 ```
 
- - `parameters`: The parameters for searching the index. For example passing `{'efSearch': '1000'}` when searching`HNSW` index, will set the efSearch field to 1000. This is recursive, for example, when using an `IVF` with `HNSW`, `ivf.efSearch` can be used to set the `efSearch` value for the `HNSW` index. Note that currently, the implementation is verry limmited. Recursion is only implemented for `IDMap` and `IVF`, and only very few fields are implemented. This is because I did not need these for my thesis, but should be easy to add.
+ - `parameters`: The parameters for searching the index. For example passing `{'efSearch': '1000'}` when searching`HNSW` index, will set the efSearch field to 1000. This is recursive, for example, when using an `IVF` with `HNSW`, `ivf.efSearch` can be used to set the `efSearch` value for the `HNSW` index. Note that currently, the implementation is limited. Recursion is only implemented for `IDMap` and `IVF`, and a few fields have been implemented only. Extending the coverage of additional FAISS options should be easy.
 
-`faiss_search` returns a list of structs with 3 fields: `rank` of type `INTEGER`, `label` of type `BIGINT`, `distance` of type `DISTANCE`. The length of this list is always `k`, even if not enough results were found. In this case the `label` field is `-1`.
-
+`faiss_search` returns a list of structs with 3 fields: `rank` (of type `INTEGER`), `label` (of type `BIGINT`), and `distance` (of type `DISTANCE`). The length of this list is fixed at `k`, even if an insufficient number of results is found - when the `label` field would correspond to `-1`.
 
 ### faiss\_search\_filter
 
@@ -213,11 +213,11 @@ And a variant with parameters:
 CALL faiss_search_filter(string name, integer k, List q, MAP<string, string> parameters);
 ```
 
- - `parameters`: The parameters for searching the index. For example passing `{'efSearch': '1000'}` when searching`HNSW` index, will set the efSearch field to 1000. This is recursive, for example, when using an `IVF` with `HNSW`, `ivf.efSearch` can be used to set the `efSearch` value for the `HNSW` index. Note that currently, the implementation is verry limmited. Recursion is only implemented for `IDMap` and `IVF`, and only very few fields are implemented. This is because I did not need these for my thesis, but should be easy to add.
+ - `parameters`: The parameters for searching the index. For example passing `{'efSearch': '1000'}` when searching`HNSW` index, will set the efSearch field to 1000. This is recursive, for example, when using an `IVF` with `HNSW`, `ivf.efSearch` can be used to set the `efSearch` value for the `HNSW` index. Note that currently, the coverage of FAISS options in the implementation is limited. Recursion is only implemented for `IDMap` and `IVF`, and only a few fields are supported. (Easy to add new options.)
 
-`faiss_search_filter` returns a list of structs with 3 fields: `rank` of type `INTEGER`, `label` of type `BIGINT`, `distance` of type `DISTANCE`. The length of this list is always `k`, even if not enough results were found. In this case the `label` field is `-1`.
+`faiss_search_filter` returns a list of structs with 3 fields: `rank` of type `INTEGER`, `label` of type `BIGINT`, and `distance` of type `DISTANCE`. The length of this list is fixed at `k`, even if an insufficient number of results is found - when the `label` field would correspond to `-1`.
 
-For context, currently the way this filter is constructed, is by executing approximatly this query: `SELECT {filter}, {idselector} FROM {tablename}`. All the ids for which the filter is `1`, will be selected for search. The amount of rows in `table` is assumed to be equal to the amount of vectors. If this is not the case, the extension might crash. This function creates a bitmap of size `n` where `n` is the size of the table, this operation is `O(n)`. To improve performance, make sure that the ids are incremental, in order, and start at a multiple of 64. This greatly helps the performance of creating the bitmap.
+For context, the filter executes (approximately) the following query: `SELECT {filter}, {idselector} FROM {tablename} WHERE {filter}`. All the ids for which the filter is `1`, will be selected for search. The number of rows in `table` is assumed to be equal to the amount of vectors, or the extension might crash. Internally, this function creates a bitmap of size `n` where `n` is the size of the table, this operation is `O(n)`. To improve performance, make sure that the ids are incremental, in order, and start at a multiple of 64. This greatly helps the performance of creating the bitmap.
 
 
 ### faiss\_search\_filter\_set
