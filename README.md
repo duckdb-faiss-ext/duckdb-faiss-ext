@@ -253,9 +253,14 @@ git clone --recurse-submodules https://github.com/arjenpdevries/faiss.git
 Note that `--recurse-submodules` will ensure the correct version of duckdb is pulled allowing you to get started right away.
 
 ## Building the extension
+
+Before building the extension with vcpkg, it is important that you use the fork https://github.com/jaicewizard/vcpkg at branch fix_openblas_macos. This can be achieved by using a recent version of the vcpkg tools and setting `VCPKG_ROOT={path to vcpkg fork}`. Alternatively, you could remove the `openmp` feature for openblas.
+
+
+
 To build the extension:
 ```sh
-make
+make release
 ```
 The main binaries that will be built are:
 ```sh
@@ -267,7 +272,28 @@ The main binaries that will be built are:
 - `unittest` is the test runner of duckdb. Again, the extension is already linked into the binary.
 - `faiss.duckdb_extension` is the loadable binary as it would be distributed.
 
+### Building without cuda
+
+When cuda is not available on your system, but you are running linux, you can comment out the following in CMakeLists.txt:
+
+```
+if(UNIX AND NOT APPLE)
+  set(FAISS_ENABLE_GPU ON)
+  add_compile_definitions(DDBF_ENABLE_GPU)
+  set(EXTENSION_SOURCES ${EXTENSION_SOURCES} ${EXTENSION_GPU_SOURCES})
+endif()
+```
+
+and 
+
+```
+  find_package(CUDAToolkit REQUIRED)
+  target_link_libraries(${EXTENSION_NAME} CUDA::cublas_static)
+  target_link_libraries(${LOADABLE_EXTENSION_NAME} CUDA::cublas_static)
+```
+
 ## Running the tests
+
 Sql test:
 ```sh
 make test
