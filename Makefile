@@ -11,6 +11,8 @@ PROJ_DIR := $(dir $(MKFILE_PATH))
 EXT_NAME=faiss
 EXT_NAME_UPPER=FAISS
 EXT_CONFIG=${PROJ_DIR}extension_config.cmake
+EXT_RELEASE_FLAGS=""
+
 include extension-ci-tools/makefiles/duckdb_extension.Makefile
 
 
@@ -18,14 +20,32 @@ prebuild:
 
 ifneq ($(DUCKDB_PLATFORM), )
 ifeq ($(findstring $(DUCKDB_PLATFORM), linux_amd64 linux_arm64), $(DUCKDB_PLATFORM))
+
+ifeq ($(findstring $(DUCKDB_PLATFORM), linux_amd64), $(DUCKDB_PLATFORM))
+EXT_RELEASE_FLAGS:=-DCMAKE_CUDA_COMPILER=/usr/local/cuda-11.6/bin/nvcc
+else
+EXT_RELEASE_FLAGS:=-DCMAKE_CUDA_COMPILER=/usr/local/cuda-11.6/bin/nvcc -DCMAKE_CUDA_HOST_COMPILER=aarch64-linux-gnu-g++ -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=aarch64 -DCMAKE_SYSTEM_LIBRARY_PATH=/usr/aarch64-linux-gnu/lib
+endif
+
 prebuild:
-	# linux should be fixed in 1.8.1 (https://github.com/facebookresearch/faiss/pull/3860)
-	cd faiss; git status -s; if [ -z "$(git status -s)" ]; then \
-		git apply ../faiss-linux.patch; \
-		git apply ../faiss-arm.patch; \
-	fi
-	sed -i '/cmake_minimum_required(VERSION 3.23.1 FATAL_ERROR)/c\\' faiss/CMakeLists.txt
-	touch prebuild # make sure this rule doesnt get run twice?
+	wget -qO - https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/7fa2af80.pub | apt-key add -
+	wget -qO - https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/3bf863cc.pub | apt-key add -
+	bash -c 'echo "deb http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/cross-linux-sbsa /" >> /etc/apt/sources.list.d/cuda.list'
+	bash -c 'echo "deb http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64 /" >> /etc/apt/sources.list.d/cuda.list'
+	apt-get update
+	DEBIAN_FRONTEND=noninteractive apt-get install -y -qq cuda-11-6 cuda-compiler-11.6 cuda-cross-sbsa-11-6
+	cd faiss && git apply ../faiss-gpu.patch
+else
+ifeq ($(findstring $(DUCKDB_PLATFORM), linux_amd64_gcc4), $(DUCKDB_PLATFORM))
+EXT_RELEASE_FLAGS:=-DCMAKE_CUDA_COMPILER=/usr/local/cuda-11.6/bin/nvcc
+prebuild:
+	yum -y install wget
+	yum-config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel7/x86_64/cuda-rhel7.repo
+#	ubuntu 18.04 sbsa doesn't support cuda versions above this
+	yum -y install cuda-11-6 cuda-compiler-11-6
+	cd faiss && git apply ../faiss-gpu.patch
+	cd duckdb && git apply ../duckdb_gcc4.patch
+endif
 endif
 ifeq ($(findstring $(DUCKDB_PLATFORM), osx_amd64 osx_arm64), $(DUCKDB_PLATFORM))
 export VCPKG_OVERLAY_TRIPLETS=$(pwd)"/overlay_triplets"
@@ -34,29 +54,13 @@ prebuild:
 	cp vcpkg/triplets/x64-osx.cmake overlay_triplets/x64-osx.cmake
 	echo "set(VCPKG_OSX_DEPLOYMENT_TARGET 11.0)" >> overlay_triplets/x64-osx.cmake
 endif
-ifeq ($(findstring $(DUCKDB_PLATFORM), windows_amd64), $(DUCKDB_PLATFORM))
-export VCPKG_OVERLAY_TRIPLETS=$(pwd)"/overlay_triplets"
-prebuild:
-	mkdir -p overlay_triplets
-	cp vcpkg/triplets/x64-osx.cmake overlay_triplets/x64-osx.cmake
-	echo "set(VCPKG_PLATFORM_TOOLSET_VERSION 14.40)" >> overlay_triplets/x64-osx.cmake
-endif
-ifeq ($(findstring $(DUCKDB_PLATFORM), windows_amd64_rtools), windows_amd64_rtools)
+ifeq ($(findstring $(DUCKDB_PLATFORM), windows_amd64_mingw), windows_amd64_mingw)
 prebuild:
 	cd faiss && git apply ../faiss.patch
-	cp C:/rtools42/x86_64-w64-mingw32.static.posix/bin/gcc.exe C:/rtools42/x86_64-w64-mingw32.static.posix/bin/x86_64-w64-mingw32-gcc.exe 
-	cp C:/rtools42/x86_64-w64-mingw32.static.posix/bin/g++.exe C:/rtools42/x86_64-w64-mingw32.static.posix/bin/x86_64-w64-mingw32-g++.exe 
-	cp C:/rtools42/x86_64-w64-mingw32.static.posix/bin/gfortran.exe C:/rtools42/x86_64-w64-mingw32.static.posix/bin/x86_64-w64-mingw32-gfortran.exe 
 endif
 endif
 
 release: prebuild
-
-# reldebug isn't defined by the the duckdb extension template
-reldebug:
-	mkdir -p build/reldebug && \
-	cmake $(GENERATOR) ${BUILD_FLAGS} -DCMAKE_BUILD_TYPE=RelWithDebInfo -S ./duckdb/ -B build/reldebug && \
-	cmake --build build/reldebug --config RelWithDebInfo
 
 # Client tests
 DEBUG_EXT_PATH='$(PROJ_DIR)build/debug/extension/${EXT_NAME}/${EXT_NAME}.duckdb_extension'

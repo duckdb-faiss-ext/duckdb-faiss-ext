@@ -1,15 +1,20 @@
 {
-    "dependencies": [
+	"dependencies": [
 		"blas",
 		{
 			"name": "openblas",
+			"features": [
+				"openmp"
+			],
 			"platform": "!((windows & !mingw) & static)"
 		},
 		"lapack",
 		{
 			"name": "lapack-reference",
-			"features": ["cblas"],
+			"features": [
+				"cblas"
+			],
 			"platform": "(windows & !mingw) & static"
 		}
-    ]
+	]
 }

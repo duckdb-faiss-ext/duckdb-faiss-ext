@@ -37,69 +37,18 @@
 #include "faiss/impl/IDSelector.h"
 #include "faiss/index_factory.h"
 #include "faiss/index_io.h"
+#include "gpu.hpp"
+#include "index.hpp"
 #include "maputils.hpp"
 
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <ostream>
 #include <string>
 #include <vector>
 #define DUCKDB_EXTENSION_MAIN
 
 namespace duckdb {
-
-enum LABELSTATE {
-	UNDECIDED,
-	FALSE,
-	TRUE,
-};
-
-struct IndexEntry : ObjectCacheEntry {
-	unique_ptr<std::mutex>
-	    faiss_lock; // c++11 doesnt have a shared_mutex, introduced in c++14. duckdb is build with c++11
-	unique_ptr<faiss::Index> index;
-
-	// This is true if the index needs training. When adding data
-	// this is used to determine if it should re-train or not.
-	bool needs_training = true;
-	// isMutable reflects whether it is possible to add data to this
-	// index while staying consistent.
-	// If an index is loaded from disk, all meta-data is lost, so for safety
-	// we assume that it is not possible to add any data, unless we know that it still
-	// needs training (and thus doesnt have any data yet).needs_training
-	bool isMutable = true;
-
-	// Whether or not custom labels are used for this index.
-	LABELSTATE custom_labels = UNDECIDED;
-
-	// This keeps track of how many threads are currently adding, this is to make sure that we
-	// only train/push to faiss when there are no threads adding more data. Does not guarantee
-	// that all data has been added, as some threads may just have not been started yet
-	std::atomic_uint64_t currently_adding;
-	unique_ptr<std::mutex> add_lock;
-	// Store chunks for the add function (which can be done in parallel)
-	// to be added all at once at the end
-	vector<float> add_data;
-	vector<faiss::idx_t> add_labels;
-	// Keeps track of how many vectors are there in total
-	size_t size = 0;
-	// keeps track of how many vectors have been added
-	size_t added = 0;
-
-	// Lock making sure only one thread uses the mask at a time
-	unique_ptr<std::mutex> mask_lock = unique_ptr<std::mutex>(new std::mutex());
-	// Temporary storage for selection mask
-	vector<uint8_t> mask_tmp;
-
-	static string ObjectType() {
-		return "faiss_index";
-	}
-
-	string GetObjectType() override {
-		return IndexEntry::ObjectType();
-	}
-};
 
 // Create function
 
@@ -399,6 +348,7 @@ static OperatorFinalizeResultType MTrainFinaliseFunction(ExecutionContext &conte
 	try {
 		entry.index->train((faiss::idx_t)state.add_data.size() / entry.index->d, &state.add_data[0]);
 	} catch (faiss::FaissException exception) {
+		entry.faiss_lock.get()->unlock();
 		std::string msg = exception.msg;
 		if (msg.find("should be at least as large as number of clusters") != std::string::npos) {
 			throw InvalidInputException(
@@ -515,12 +465,13 @@ static OperatorResultType AddFunction(ExecutionContext &context, TableFunctionIn
 				entry.index->add((faiss::idx_t)input.size(), child_ptr);
 			}
 		} catch (faiss::FaissException exception) {
+			entry.faiss_lock.get()->unlock();
+
 			// This should reset if no data was added for some reason.
 			if (entry.custom_labels == TRUE && entry.index->ntotal == 0) {
 				entry_ptr.get()->custom_labels = UNDECIDED;
 			}
 
-			entry.faiss_lock.get()->unlock();
 			std::string msg = exception.msg;
 			if (msg.find("add_with_ids not implemented for this type of index") != std::string::npos) {
 				throw InvalidInputException("Unable to add data: This type of index does not support adding with IDs. "
@@ -589,6 +540,7 @@ static OperatorFinalizeResultType AddFinaliseFunction(ExecutionContext &context,
 	try {
 		entry.index->train((faiss::idx_t)total_elements, &entry.add_data[0]);
 	} catch (faiss::FaissException exception) {
+		entry.faiss_lock.get()->unlock();
 		std::string msg = exception.msg;
 		if (msg.find("should be at least as large as number of clusters") != std::string::npos) {
 			throw InvalidInputException(
@@ -603,8 +555,8 @@ static OperatorFinalizeResultType AddFinaliseFunction(ExecutionContext &context,
 	// We only add data that havn't been added yet, so we skip the data already added
 	faiss::idx_t new_element_count = total_elements - added_elements;
 	float *new_vector_data = &entry.add_data[added_elements * entry.index->d];
-	faiss::idx_t *new_label_data = &entry.add_labels[added_elements];
 	if (entry.custom_labels == TRUE) {
+		faiss::idx_t *new_label_data = &entry.add_labels[added_elements];
 		entry.index->add_with_ids(new_element_count, new_vector_data, new_label_data);
 	} else {
 		entry.index->add(new_element_count, new_vector_data);
@@ -627,7 +579,14 @@ void searchIntoVector(ClientContext &ctx, IndexEntry &entry, Vector inputdata, s
 	unique_ptr<float[]> distances = unique_ptr<float[]>(new float[nQueries * nResults]);
 
 	entry.faiss_lock.get()->lock(); //  this should be a readlock once c++17 is supported
-	entry.index->search((faiss::idx_t)nQueries, child_ptr, nResults, distances.get(), labels.get(), searchParams);
+	try {
+		entry.index->search((faiss::idx_t)nQueries, child_ptr, nResults, distances.get(), labels.get(), searchParams);
+	} catch (faiss::FaissException exception) {
+		entry.faiss_lock.get()->unlock();
+		std::string msg = exception.msg;
+		throw InvalidInputException("Error occured while searching: %s", msg);
+	}
+
 	entry.faiss_lock.get()->unlock();
 
 	ListVector::SetListSize(output, nQueries * nResults);
@@ -689,6 +648,20 @@ vector<shared_ptr<faiss::SearchParameters>> innerCreateSearchParameters(faiss::I
 
 		return vector<shared_ptr<faiss::SearchParameters>>(1, searchParams);
 	}
+
+	void *pq = dynamic_cast<faiss::IndexPQ *>(index);
+	if (pq) {
+		shared_ptr<faiss::SearchParametersPQ> searchParams = make_shared_ptr<faiss::SearchParametersPQ>();
+		return vector<shared_ptr<faiss::SearchParameters>>(1, searchParams);
+	}
+
+#ifdef DDBF_ENABLE_GPU
+	vector<shared_ptr<faiss::SearchParameters>> gpuparams =
+	    innerCreateSearchParametersGPU(index, selector, userParams, paramCount, prefix);
+	if (gpuparams.size() != 0) {
+		return gpuparams;
+	}
+#endif
 
 	shared_ptr<faiss::SearchParameters> searchParams = make_shared_ptr<faiss::SearchParameters>();
 	searchParams->sel = selector;
@@ -1015,7 +988,14 @@ static void LoadInternal(DatabaseInstance &instance) {
 		CreateTableFunctionInfo create_info(create_func);
 		catalog.CreateTableFunction(*con.context, &create_info);
 	}
-
+#ifdef DDBF_ENABLE_GPU
+	{
+		TableFunction create_func("faiss_to_gpu", {LogicalType::VARCHAR, LogicalType::INTEGER}, MoveToGPUFunction,
+		                          MoveToGPUBind);
+		CreateTableFunctionInfo create_info(create_func);
+		catalog.CreateTableFunction(*con.context, &create_info);
+	}
+#endif
 	{
 		TableFunction save_function("faiss_save", {LogicalType::VARCHAR, LogicalType::VARCHAR}, SaveFunction, SaveBind);
 		CreateTableFunctionInfo add_info(save_function);
@@ -1140,7 +1120,7 @@ std::string FaissExtension::Name() {
 }
 
 std::string FaissExtension::Version() const {
-	return "0.9.0";
+	return "0.10.0";
 }
 
 } // namespace duckdb

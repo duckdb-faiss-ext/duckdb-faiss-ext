@@ -10,3 +10,4 @@ libomp
 conformanceTests
 .cache
 indices
+vcpkg_installed
