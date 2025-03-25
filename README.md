@@ -217,7 +217,7 @@ CALL faiss_search_filter(string name, integer k, List q, MAP<string, string> par
 
 `faiss_search_filter` returns a list of structs with 3 fields: `rank` of type `INTEGER`, `label` of type `BIGINT`, and `distance` of type `DISTANCE`. The length of this list is fixed at `k`, even if an insufficient number of results is found - when the `label` field would correspond to `-1`.
 
-For context, the filter executes (approximately) the following query: `SELECT {filter}, {idselector} FROM {tablename} WHERE {filter}`. All the ids for which the filter is `1`, will be selected for search. The number of rows in `table` is assumed to be equal to the amount of vectors, or the extension might crash. Internally, this function creates a bitmap of size `n` where `n` is the size of the table, this operation is `O(n)`. To improve performance, make sure that the ids are incremental, in order, and start at a multiple of 64. This greatly helps the performance of creating the bitmap.
+For context, the filter executes (approximately) the following query: `SELECT {idselector} FROM {tablename} WHERE {filter}=1`. Only IDs for which the filter evaluates to `1` are included in the search results. The number of rows in `table` is assumed to be equal to the amount of vectors, or the extension might crash. Internally, this function creates a bitmap of size `n` where `n` is the size of the table, this operation is `O(n)`. To improve performance, make sure that the ids are incremental, in order, and start at a multiple of 64. This greatly helps the performance of creating the bitmap.
 
 
 ### faiss\_search\_filter\_set
@@ -239,61 +239,66 @@ And a variant with parameters:
 CALL faiss_search_filter_set(string name, integer k, List q, MAP<string, string> parameters);
 ```
 
- - `parameters`: The parameters for searching the index. For example passing `{'efSearch': '1000'}` when searching`HNSW` index, will set the efSearch field to 1000. This is recursive, for example, when using an `IVF` with `HNSW`, `ivf.efSearch` can be used to set the `efSearch` value for the `HNSW` index. Note that currently, the implementation is verry limmited. Recursion is only implemented for `IDMap` and `IVF`, and only very few fields are implemented. This is because I did not need these for my thesis, but should be easy to add.
+ - `parameters`: The parameters for searching the index. For example passing `{'efSearch': '1000'}` when searching`HNSW` index, will set the efSearch field to 1000. This is recursive, for example, when using an `IVF` with `HNSW`, `ivf.efSearch` can be used to set the `efSearch` value for the `HNSW` index. Note that currently, the implementation is limited. Recursion is only implemented for `IDMap` and `IVF`, and a few fields are implemented only. (Other FAISS options would be easy to add.)
 
-`faiss_search_filter_set` returns a list of structs with 3 fields: `rank` of type `INTEGER`, `label` of type `BIGINT`, `distance` of type `DISTANCE`. The length of this list is always `k`, even if not enough results were found. In this case the `label` field is `-1`.
+`faiss_search_filter_set` returns a list of structs with 3 fields: `rank` of type `INTEGER`, `label` of type `BIGINT`, and `distance` of type `DISTANCE`. The length of this list is always `k`, even if an insufficient number of results is found; superfluous items have a `label` field equal to `-1`.
 
-For context, currently the way this filter is constructed, is by executing approximatly this query: `SELECT {idselector} FROM {tablename} WHERE {filter}=1`. All the ids for which the filter is `1`, will be selected for search. The amount of rows in `table` is assumed to be equal to the amount of vectors. If this is not the case, the extension might crash. This function creates a set of size `m` where `m` is the amount of vectors that are included in the search, this operation is `O(m)`.
+For context, currently the way this filter is constructed, is by executing approximately this query: `SELECT {idselector} FROM {tablename} WHERE {filter}=1`. Only IDs for which the filter evaluates to `1` will be included in the search results. The amount of rows in `table` is assumed to be equal to the amount of vectors. If this is not the case, the extension might crash. This function creates a set of size `m` where `m` is the amount of vectors that are included in the search, this operation is `O(m)`.
 
-# Compiling yourself
-First step to getting started is to clone this repo: 
+# Custom Builds
+
+## Checkout the repository
+
+Clone the repository and check out the git submodules:
 ```sh
 git clone --recurse-submodules https://github.com/arjenpdevries/faiss.git
 ```
-Note that `--recurse-submodules` will ensure the correct version of duckdb is pulled allowing you to get started right away.
+Usung `--recurse-submodules` ensures to clone the right versions of DuckDB and FAISS for the extension.
 
 ## Building the extension
 
-Before building the extension with vcpkg, it is important that you use the fork https://github.com/jaicewizard/vcpkg at branch fix_openblas_macos. This can be achieved by using a recent version of the vcpkg tools and setting `VCPKG_ROOT={path to vcpkg fork}`. Alternatively, you could remove the `openmp` feature for openblas.
+Building the extension depends upon the [`vcpkg` fork here](https://github.com/jaicewizard/vcpkg) at branch `fix_openblas_macos`, using a recent version of the vcpkg tools and setting `VCPKG_ROOT={path to vcpkg fork}`. 
 
-
+Alternatively, remove the `openmp` feature for from the `openblas` specification in `vcpkg.json`.
 
 To build the extension:
 ```sh
 make release
 ```
-The main binaries that will be built are:
+The main binaries to build are:
 ```sh
 ./build/release/duckdb
 ./build/release/test/unittest
 ./build/release/extension/faiss/faiss.duckdb_extension
 ```
+
+Here:
 - `duckdb` is the binary for the duckdb shell with the extension code automatically loaded. 
 - `unittest` is the test runner of duckdb. Again, the extension is already linked into the binary.
 - `faiss.duckdb_extension` is the loadable binary as it would be distributed.
 
-### Building with cuda
+### Building with CUDA
 
 Enable building with CUDA by setting the following environment variable:
 
     export DUCKDB_FAISS_EXT_ENABLE_GPU_CUDA
 
-## Running the tests
+## RUNNING tests
 
 Sql test:
 ```sh
 make test
 ```
 
-## Running the conformance/accuracy tests
+## Running conformance/accuracy tests
 
-For now, the accuracy tests are seperate from the normal tests, since they require a large download.
+For now, the accuracy tests are separated from the normal tests, since they require a large download.
+
 To run the index index accuracy tests run:
 
 ```
 make run_msmarco_queries
 ```
-
 
 # TODO list
 
