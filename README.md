@@ -272,25 +272,11 @@ The main binaries that will be built are:
 - `unittest` is the test runner of duckdb. Again, the extension is already linked into the binary.
 - `faiss.duckdb_extension` is the loadable binary as it would be distributed.
 
-### Building without cuda
+### Building with cuda
 
-When cuda is not available on your system, but you are running linux, you can comment out the following in CMakeLists.txt:
+Enable building with CUDA by setting the following environment variable:
 
-```
-if(UNIX AND NOT APPLE)
-  set(FAISS_ENABLE_GPU ON)
-  add_compile_definitions(DDBF_ENABLE_GPU)
-  set(EXTENSION_SOURCES ${EXTENSION_SOURCES} ${EXTENSION_GPU_SOURCES})
-endif()
-```
-
-and 
-
-```
-  find_package(CUDAToolkit REQUIRED)
-  target_link_libraries(${EXTENSION_NAME} CUDA::cublas_static)
-  target_link_libraries(${LOADABLE_EXTENSION_NAME} CUDA::cublas_static)
-```
+    export DUCKDB_FAISS_EXT_ENABLE_GPU_CUDA
 
 ## Running the tests
 
