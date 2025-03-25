@@ -22,6 +22,10 @@ file(
 set(EXTENSION_SOURCES ${EXTENSION_SOURCES})
 set(EXTENSION_GPU_SOURCES ${EXTENSION_GPU_SOURCES})
 
+if(DEFINED ENV{DUCKDB_FAISS_EXT_ENABLE_GPU_CUDA})
+  set(DUCKDB_FAISS_EXT_ENABLE_GPU_CUDA TRUE)
+endif()
+
 include_directories(src/include)
 include_directories(faiss/)
 
