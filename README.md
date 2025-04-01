@@ -279,11 +279,9 @@ Here:
 
 ### Building with CUDA
 
-Enable building with CUDA by setting the following environment variable:
+CUDA is enabled by default on linux platforms, however, when you do not wish to compile with cuda, simply pass `FAISS_EXT_NO_GPU=FALSE` to make when compiling. This will disable compiling for CUDA, allowing builds on systems without CUDA.
 
-    export DUCKDB_FAISS_EXT_ENABLE_GPU_CUDA
-
-## RUNNING tests
+## Running the tests
 
 Sql test:
 ```sh
