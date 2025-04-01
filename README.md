@@ -274,23 +274,7 @@ The main binaries that will be built are:
 
 ### Building without cuda
 
-When cuda is not available on your system, but you are running linux, you can comment out the following in CMakeLists.txt:
-
-```
-if(UNIX AND NOT APPLE)
-  set(FAISS_ENABLE_GPU ON)
-  add_compile_definitions(DDBF_ENABLE_GPU)
-  set(EXTENSION_SOURCES ${EXTENSION_SOURCES} ${EXTENSION_GPU_SOURCES})
-endif()
-```
-
-and 
-
-```
-  find_package(CUDAToolkit REQUIRED)
-  target_link_libraries(${EXTENSION_NAME} CUDA::cublas_static)
-  target_link_libraries(${LOADABLE_EXTENSION_NAME} CUDA::cublas_static)
-```
+CUDA is enabled by default on linux platforms, however, when you do not wish to compile with cuda, simply pass `FAISS_EXT_NO_GPU=FALSE` to make when compiling. This will disable compiling for CUDA, allowing builds on systems without CUDA.
 
 ## Running the tests
 
