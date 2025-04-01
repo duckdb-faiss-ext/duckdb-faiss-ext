@@ -15,6 +15,11 @@ EXT_RELEASE_FLAGS=""
 
 include extension-ci-tools/makefiles/duckdb_extension.Makefile
 
+ifndef FAISS_EXT_NO_GPU
+	EXT_FLAGS := -DDUCKDB_FAISS_ENABLE_GPU=TRUE
+else
+	EXT_FLAGS := -DDUCKDB_FAISS_ENABLE_GPU=FALSE
+endif
 
 prebuild:
 

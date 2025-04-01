@@ -28,9 +28,15 @@ include_directories(faiss/)
 set(FIND_LIBRARY_USE_LIB64_PATHS TRUE)
 
 # configure
+# If GPU is enabled and we are on a supported platform
+message(WARNING "${DUCKDB_FAISS_ENABLE_GPU}")
+if(DUCKDB_FAISS_ENABLE_GPU AND NOT UNIX OR APPLE)
+  set(DUCKDB_FAISS_ENABLE_GPU FALSE)
+endif()
+
 set(FAISS_ENABLE_PYTHON OFF)
 set(FAISS_ENABLE_GPU OFF)
-if(UNIX AND NOT APPLE)
+if(DUCKDB_FAISS_ENABLE_GPU)
   set(FAISS_ENABLE_GPU ON)
   add_compile_definitions(DDBF_ENABLE_GPU)
   set(EXTENSION_SOURCES ${EXTENSION_SOURCES} ${EXTENSION_GPU_SOURCES})
@@ -44,7 +50,7 @@ build_loadable_extension(${TARGET_NAME} "" ${EXTENSION_SOURCES})
 # link libraries
 add_subdirectory(faiss)
 
-if(UNIX AND NOT APPLE)
+if(DUCKDB_FAISS_ENABLE_GPU)
   # If we are linking with faiss+GPU, we need access to cuda as well for the
   # faiss headers. + we need to link faiss as whole-archive, since faiss depends
   # on faiss_gpu and faiss_gpu on faiss.
