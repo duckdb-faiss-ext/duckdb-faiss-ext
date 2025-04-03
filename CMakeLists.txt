@@ -33,7 +33,6 @@ set(FIND_LIBRARY_USE_LIB64_PATHS TRUE)
 
 # configure
 # If GPU is enabled and we are on a supported platform
-message(WARNING "${DUCKDB_FAISS_ENABLE_GPU}")
 if(DUCKDB_FAISS_EXT_ENABLE_GPU_CUDA AND NOT UNIX OR APPLE)
   set(DUCKDB_FAISS_EXT_ENABLE_GPU_CUDA FALSE)
 endif()
