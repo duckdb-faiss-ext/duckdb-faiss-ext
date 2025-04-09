@@ -19,11 +19,11 @@ jobs:
     name: Build extension binaries
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@00e6af068429bf776a54f67cb1cd1ff5370a8dd7
     with:
-      duckdb_version: v1.2.1
+      duckdb_version: v1.2.2
       ci_tools_version: 00e6af068429bf776a54f67cb1cd1ff5370a8dd7
       extension_name: faiss
       vcpkg_url: "https://github.com/jaicewizard/vcpkg.git"
-      vcpkg_commit: 4fe7e653dc890107114844d7e20ba8ff2b65a2ce
+      vcpkg_commit: 917a983908a8d3868359c5d9bccb44781a4ac32b
       # OSX amd64 is disabled due to https://github.com/duckdb/extension-ci-tools/issues/158
       # musl is disabled due to https://github.com/duckdb/extension-ci-tools/issues/135
       exclude_archs: "osx_amd64;wasm_mvp;wasm_eh;wasm_threads;linux_amd64_musl"
