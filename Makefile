@@ -15,7 +15,7 @@ EXT_RELEASE_FLAGS=""
 
 include extension-ci-tools/makefiles/duckdb_extension.Makefile
 
-ifndef FAISS_EXT_NO_GPU
+ifneq ("${FAISS_EXT_NO_GPU}", "TRUE")
 	EXT_FLAGS := -DDUCKDB_FAISS_EXT_ENABLE_GPU_CUDA=TRUE
 else
 	EXT_FLAGS := -DDUCKDB_FAISS_EXT_ENABLE_GPU_CUDA=FALSE

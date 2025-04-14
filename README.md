@@ -279,7 +279,7 @@ Here:
 
 ### Building with CUDA
 
-CUDA is enabled by default on linux platforms, however, when you do not wish to compile with cuda, simply pass `FAISS_EXT_NO_GPU=FALSE` to make when compiling. This will disable compiling for CUDA, allowing builds on systems without CUDA.
+CUDA is enabled by default on linux platforms, however, when you do not wish to compile with cuda, simply pass `FAISS_EXT_NO_GPU=TRUE` to make when compiling like so: `make release -j FAISS_EXT_NO_GPU=TRUE`. This will disable compiling for CUDA, allowing builds on systems without CUDA.
 
 ## Running the tests
 
