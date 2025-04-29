@@ -26,9 +26,9 @@ func main() {
 		fmt.Println("Unable to import msmarco")
 		return
 	}
-	_, err = db.Exec(fmt.Sprintf("CALL FAISS_CREATE('main', %d, '%s')", vectorLength, indexType))
+	_, err = db.Exec(fmt.Sprintf("CALL FAISS_CREATE_PARAMS('main', %d, '%s', MAP{'efConstruct': '128'})", vectorLength, indexType))
 	if err != nil {
-		fmt.Println("Unable to create the faiss index")
+		fmt.Println("Unable to create the faiss index:", err)
 		return
 	}
 	_, err = db.Exec("CALL FAISS_MANUAL_TRAIN((SELECT vector FROM input), 'main')")
