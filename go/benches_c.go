@@ -53,7 +53,7 @@ void init_faiss() {
 		printf("unable to load faiss\n");
 	}
 
-	state = duckdb_query(con, "CALL FAISS_LOAD('flat', 'indices/index_HNSW128-100');", NULL);
+	state = duckdb_query(con, "CALL FAISS_LOAD('flat', 'indices/IDMap,HNSW128,Flat.index');", NULL);
 	if (state == DuckDBError) {
 		printf("unable to load faiss index\n");
 	}

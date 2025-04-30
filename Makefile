@@ -82,6 +82,7 @@ conformanceTests/anserini-tools: conformanceTests
 	cd conformanceTests && git clone https://github.com/castorini/anserini-tools
 
 go_setup: reldebug
+	cp $(PROJ_DIR)/duckdb/src/include/duckdb.h $(PROJ_DIR)/go/duckdb.h
 	cp $(PROJ_DIR)/build/reldebug/src/libduckdb_static.a $(PROJ_DIR)/go/deps/linux_amd64/libduckdb.a
 	cp $(PROJ_DIR)/build/reldebug/third_party/**/*.a $(PROJ_DIR)/go/deps/linux_amd64
 	cp $(PROJ_DIR)/build/reldebug/extension/**/*.a $(PROJ_DIR)/go/deps/linux_amd64
@@ -99,7 +100,7 @@ indices/%:
 
 create_indices: indices/IDMap,HNSW128,Flat indices/IVF2048_HNSW128,Flat
 
-benchmark: go/faissextcode.test
+benchmark: go/faissextcode.test indices/IDMap,HNSW128,Flat.index
 	go/faissextcode.test -test.run="^$$" -test.bench=. -test.benchtime=30s -test.timeout=12h | tee results
 
 run_msmarco_queries: indices/IDMap,HNSW128,Flat
