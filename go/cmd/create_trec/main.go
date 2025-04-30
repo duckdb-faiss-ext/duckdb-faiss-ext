@@ -20,7 +20,7 @@ func main() {
 		panic(err)
 	}
 
-	_, err = db.Exec("CALL FAISS_LOAD('flat', 'conformanceTests/index_IVF2048')")
+	_, err = db.Exec("CALL FAISS_LOAD('flat', 'indices/index_IVF65536_HNSW32')")
 	if err != nil {
 		panic(err)
 	}
@@ -29,7 +29,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	rows, err := db.Query("SELECT qid, UNNEST(faiss_search('flat', 1000, embedding)) FROM queries")
+	rows, err := db.Query("SELECT qid, UNNEST(faiss_search('flat', 1000, embedding, MAP{'nprobe': '32'})) FROM queries")
 	if err != nil {
 		panic(err)
 	}
