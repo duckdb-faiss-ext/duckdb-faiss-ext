@@ -3,8 +3,11 @@ package faissextcode
 /*
 #include <duckdb.h>
 #include <stdio.h>
+#include <stdlib.h>
+
 duckdb_database db;
 duckdb_connection con;
+
 void init() {
 	duckdb_config config;
 
