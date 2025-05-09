@@ -100,7 +100,7 @@ indices/%:
 
 create_indices: indices/IDMap,HNSW128,Flat indices/IVF2048_HNSW128,Flat
 
-benchmark: go/faissextcode.test indices/IDMap,HNSW128,Flat.index
+benchmark: go/faissextcode.test indices/IDMap,HNSW128,Flat
 	go/faissextcode.test -test.run="^$$" -test.bench=. -test.benchtime=30s -test.timeout=12h | tee results
 
 run_msmarco_queries: indices/IDMap,HNSW128,Flat
