@@ -20,7 +20,7 @@ func main() {
 		panic(err)
 	}
 
-	_, err = db.Exec("CALL FAISS_LOAD('flat', 'indices/index_IVF65536_HNSW32')")
+	_, err = db.Exec("CALL FAISS_LOAD('flat', 'indices/IDMap,HNSW128,Flat.index')")
 	if err != nil {
 		panic(err)
 	}

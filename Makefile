@@ -70,7 +70,7 @@ release: prebuild
 # Client tests
 DEBUG_EXT_PATH='$(PROJ_DIR)build/debug/extension/${EXT_NAME}/${EXT_NAME}.duckdb_extension'
 RELDEBUG_EXT_PATH='$(PROJ_DIR)build/reldebug/extension/${EXT_NAME}/${EXT_NAME}.duckdb_extension'
-GOLINKFLAGS=-L$(PROJ_DIR)/go/deps/linux_amd64 -lduckdb -lduckdb_utf8proc -lduckdb_pg_query -lduckdb_re2 -lduckdb_fmt -lduckdb_hyperloglog -lduckdb_fastpforlib -lduckdb_miniz -lduckdb_mbedtls -lduckdb_fsst -lduckdb_skiplistlib -ljson_extension -licu_extension -lfts_extension -ljemalloc_extension -lparquet_extension -ltpcds_extension -ltpch_extension -lvisualizer_extension -lfaiss_extension -lomp -lblas -llapack -lm -lstdc++ -fsanitize=undefined
+GOLINKFLAGS=-L$(PROJ_DIR)/go/deps/linux_amd64 -lduckdb -lduckdb_utf8proc -lduckdb_pg_query -lduckdb_re2 -lduckdb_fmt -lduckdb_hyperloglog -lduckdb_fastpforlib -lduckdb_miniz -lduckdb_mbedtls -lduckdb_fsst -lduckdb_skiplistlib -lduckdb_yyjson -ljson_extension -licu_extension -lfts_extension -ljemalloc_extension -lparquet_extension -ltpcds_extension -ltpch_extension -lvisualizer_extension -lfaiss_extension -lfaiss -lomp -lblas -llapack -lm -lstdc++ -fsanitize=undefined
 
 conformanceTests:
 	mkdir conformanceTests
@@ -82,6 +82,7 @@ conformanceTests/anserini-tools: conformanceTests
 	cd conformanceTests && git clone https://github.com/castorini/anserini-tools
 
 go_setup: reldebug
+	cp $(PROJ_DIR)/duckdb/src/include/duckdb.h $(PROJ_DIR)/go/duckdb.h
 	cp $(PROJ_DIR)/build/reldebug/src/libduckdb_static.a $(PROJ_DIR)/go/deps/linux_amd64/libduckdb.a
 	cp $(PROJ_DIR)/build/reldebug/third_party/**/*.a $(PROJ_DIR)/go/deps/linux_amd64
 	cp $(PROJ_DIR)/build/reldebug/extension/**/*.a $(PROJ_DIR)/go/deps/linux_amd64
@@ -93,13 +94,13 @@ go/create_index: go_setup conformanceTests/msmarco-passage-openai-ada2
 go/create_trec: go_setup conformanceTests/anserini-tools
 	cd go && CGO_LDFLAGS="$(GOLINKFLAGS)" go build faissextcode/cmd/create_trec
 
-indices/%:
+indices/%: go/create_index
 	mkdir -p "indices"
 	${EXT_NAME_UPPER}_EXTENSION_BINARY_PATH=$(RELDEBUG_EXT_PATH) go/create_index $(notdir $@) "$@.index"
 
 create_indices: indices/IDMap,HNSW128,Flat indices/IVF2048_HNSW128,Flat
 
-benchmark: go/faissextcode.test
+benchmark: go/faissextcode.test indices/IDMap,HNSW128,Flat
 	go/faissextcode.test -test.run="^$$" -test.bench=. -test.benchtime=30s -test.timeout=12h | tee results
 
 run_msmarco_queries: indices/IDMap,HNSW128,Flat
