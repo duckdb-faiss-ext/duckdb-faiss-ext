@@ -1,0 +1,14 @@
+# name: test/sql/faiss.test
+# description: test faiss extension
+# group: [faiss]
+
+require faiss
+
+statement ok
+CALL faiss_create('demo', 8, 'IDMap,Flat');
+
+statement ok
+CALL faiss_destroy('demo')
+
+statement ok
+CALL faiss_create('demo', 8, 'IDMap,Flat');
