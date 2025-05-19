@@ -1,0 +1,40 @@
+# name: test/sql/faiss.test
+# description: test faiss extension
+# group: [faiss]
+
+require faiss
+
+statement error
+CALL faiss_create('hnsw32', 8, 'IDMap,HNSW32', ef_construction=-1);
+----
+Invalid Input Error: ef_construction must be positive
+
+statement ok
+CALL faiss_create('hnsw32', 8, 'IDMap,HNSW32', ef_construction=2);
+
+statement ok
+create table training as SELECT column0 lbl, list_value(column1, column2, column3, column4, column5, column6, column7, column8) emb FROM 'test/sql/training.csv'
+
+statement ok
+CREATE TABLE queries AS SELECT * FROM 'test/sql/queries.csv';
+
+statement ok
+CALL faiss_manual_train((SELECT emb FROM training), 'hnsw32')
+
+statement ok
+CALL faiss_add((SELECT * FROM training), 'hnsw32')
+
+statement ok
+CALL faiss_destroy('hnsw32');
+
+statement ok
+CALL faiss_create_params('hnsw8', 8, 'IDMap,HNSW32', MAP{'efConstruction': '1000'});
+
+statement ok
+CALL faiss_manual_train((SELECT emb FROM training), 'hnsw8')
+
+statement ok
+CALL faiss_add((SELECT * FROM training), 'hnsw8')
+
+statement ok
+CALL faiss_destroy('hnsw8');
