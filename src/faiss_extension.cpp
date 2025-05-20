@@ -75,7 +75,6 @@ struct CreateFunctionData : public TableFunctionData {
 	faiss::MetricType metricType;
 	shared_ptr<Vector> indexParams = nullptr;
 	uint64_t paramCount = 0;
-	int efConstruction = -1;
 };
 
 std::unordered_map<std::string, CreateParamHandler> FaissExtension::create_param_handlers;
@@ -91,16 +90,6 @@ void FaissExtension::RegisterMetricType() {
 			throw InvalidInputException("Unknown metric type: %s", val.GetValue<std::string>());
 		}
 		result.metricType = it->second;
-	});
-}
-
-void FaissExtension::RegisterEfConstruction() {
-	FaissExtension::RegisterCreateParameter("ef_construction", [](CreateFunctionData &result, const Value &val) {
-		int v = val.GetValue<int>();
-		if (v <= 0) {
-			throw InvalidInputException("ef_construction must be positive");
-		}
-		result.efConstruction = v;
 	});
 }
 
@@ -131,22 +120,6 @@ static unique_ptr<FunctionData> CreateBind(ClientContext &, TableFunctionBindInp
 	return std::move(result);
 }
 
-faiss::Index *setIndexParameters(faiss::Index *index, const CreateFunctionData &param) {
-	faiss::IndexIDMap *idmap = dynamic_cast<faiss::IndexIDMap *>(index);
-	if (idmap) {
-		idmap->index = setIndexParameters(idmap->index, param);
-		return idmap;
-	}
-
-	faiss::IndexHNSW *hnsw = dynamic_cast<faiss::IndexHNSW *>(index);
-	if (hnsw) {
-		hnsw->hnsw.efConstruction = param.efConstruction;
-		return hnsw;
-	}
-
-	return index;
-}
-
 faiss::Index *setIndexParameters(faiss::Index *index, Vector *userParams, uint64_t paramCount) {
 	if (!userParams || paramCount == 0) {
 		return index;
@@ -159,6 +132,7 @@ faiss::Index *setIndexParameters(faiss::Index *index, Vector *userParams, uint64
 
 	faiss::IndexHNSW *hnsw = dynamic_cast<faiss::IndexHNSW *>(index);
 	if (hnsw) {
+		unique_ptr<faiss::SearchParametersHNSW> searchParams = make_uniq<faiss::SearchParametersHNSW>();
 		string efconstruction = getUserParamValue(*userParams, paramCount, "efConstruction");
 		if (efconstruction != "") {
 			hnsw->hnsw.efConstruction = std::stoi(efconstruction);
@@ -180,8 +154,6 @@ static void CreateFunction(ClientContext &context, TableFunctionInput &data_p, D
 	faiss::Index *index =
 	    faiss::index_factory(bind_data.dimension, bind_data.description.c_str(), bind_data.metricType);
 	index = setIndexParameters(index, bind_data.indexParams.get(), bind_data.paramCount);
-	// Named parameters take precedence
-	index = setIndexParameters(index, bind_data);
 	auto entry = make_shared_ptr<IndexEntry>();
 	entry->index = unique_ptr<faiss::Index>(index);
 	entry->needs_training = !entry->index.get()->is_trained;
@@ -422,7 +394,7 @@ static OperatorFinalizeResultType MTrainFinaliseFunction(ExecutionContext &conte
 	entry.faiss_lock.get()->lock();
 	try {
 		entry.index->train((faiss::idx_t)state.add_data.size() / entry.index->d, &state.add_data[0]);
-	} catch (faiss::FaissException &exception) {
+	} catch (faiss::FaissException exception) {
 		entry.faiss_lock.get()->unlock();
 		std::string msg = exception.msg;
 		if (msg.find("should be at least as large as number of clusters") != std::string::npos) {
@@ -539,7 +511,7 @@ static OperatorResultType AddFunction(ExecutionContext &context, TableFunctionIn
 			} else if (entry.custom_labels == FALSE) {
 				entry.index->add((faiss::idx_t)input.size(), child_ptr);
 			}
-		} catch (faiss::FaissException &exception) {
+		} catch (faiss::FaissException exception) {
 			entry.faiss_lock.get()->unlock();
 
 			// This should reset if no data was added for some reason.
@@ -614,7 +586,7 @@ static OperatorFinalizeResultType AddFinaliseFunction(ExecutionContext &context,
 	entry.faiss_lock.get()->lock();
 	try {
 		entry.index->train((faiss::idx_t)total_elements, &entry.add_data[0]);
-	} catch (faiss::FaissException &exception) {
+	} catch (faiss::FaissException exception) {
 		entry.faiss_lock.get()->unlock();
 		std::string msg = exception.msg;
 		if (msg.find("should be at least as large as number of clusters") != std::string::npos) {
@@ -656,7 +628,7 @@ void searchIntoVector(ClientContext &ctx, IndexEntry &entry, Vector inputdata, s
 	entry.faiss_lock.get()->lock(); //  this should be a readlock once c++17 is supported
 	try {
 		entry.index->search((faiss::idx_t)nQueries, child_ptr, nResults, distances.get(), labels.get(), searchParams);
-	} catch (faiss::FaissException &exception) {
+	} catch (faiss::FaissException exception) {
 		entry.faiss_lock.get()->unlock();
 		std::string msg = exception.msg;
 		throw InvalidInputException("Error occured while searching: %s", msg);
@@ -778,7 +750,7 @@ void ProcessSelectionvector(unique_ptr<DataChunk> &chunk, std::vector<uint8_t> &
 		sequential = true;
 		start = idBytes[0];
 		max = 0;
-		for (idx_t i = 0; i < size; i++) {
+		for (int i = 0; i < size; i++) {
 			max = MaxValue(max, idBytes[i]);
 			sequential &= idBytes[i] == previous + 1;
 			previous = idBytes[i];
@@ -800,7 +772,7 @@ void ProcessSelectionvector(unique_ptr<DataChunk> &chunk, std::vector<uint8_t> &
 			output[arrIndex] = output[arrIndex] | (dataBytes[i] << u8Index);
 		}
 	} else {
-		idx_t i = 0;
+		int i = 0;
 		int id = start;
 		for (; id % 8 != 0;) {
 			output[id / 8] = output[id / 8] | (dataBytes[i] << (id % 8));
@@ -854,25 +826,23 @@ struct SelData : public TableFunctionData {
 	string key;
 };
 
-/* unused
 static unique_ptr<TableFunctionData> SelBind(ClientContext &context, TableFunctionBindInput &input,
                                              vector<LogicalType> &return_types, vector<string> &names) {
-    auto bind_data = make_uniq<SelData>();
+	auto bind_data = make_uniq<SelData>();
 
-    return_types.emplace_back(LogicalType::BOOLEAN);
-    names.emplace_back("Success");
+	return_types.emplace_back(LogicalType::BOOLEAN);
+	names.emplace_back("Success");
 
-    bind_data->key = input.inputs[2].ToString();
+	bind_data->key = input.inputs[2].ToString();
 
-    auto &object_cache = ObjectCache::GetObjectCache(context);
-    auto entry_ptr = object_cache.Get<IndexEntry>(bind_data->key);
-    if (!entry_ptr) {
-        throw InvalidInputException("Could not find index %s.", bind_data->key);
-    }
+	auto &object_cache = ObjectCache::GetObjectCache(context);
+	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data->key);
+	if (!entry_ptr) {
+	    throw InvalidInputException("Could not find index %s.", bind_data->key);
+	}
 
-    return std::move(bind_data);
+	return std::move(bind_data);
 }
-*/
 
 static unique_ptr<GlobalTableFunctionState> SelGlobalInit(ClientContext &context, TableFunctionInitInput &input) {
 	unique_ptr<SelState> state = make_uniq<SelState>();
@@ -1054,7 +1024,6 @@ static void LoadInternal(DatabaseInstance &instance) {
 		TableFunction create_func("faiss_create", {LogicalType::VARCHAR, LogicalType::INTEGER, LogicalType::VARCHAR},
 		                          CreateFunction, CreateBind);
 		create_func.named_parameters["metric_type"] = LogicalType::VARCHAR;
-		create_func.named_parameters["ef_construction"] = LogicalType::INTEGER;
 		CreateTableFunctionInfo create_info(create_func);
 		catalog.CreateTableFunction(*con.context, &create_info);
 	}
@@ -1192,7 +1161,6 @@ static void LoadInternal(DatabaseInstance &instance) {
 
 void FaissExtension::Load(DuckDB &db) {
 	RegisterMetricType();
-	RegisterEfConstruction();
 	LoadInternal(*db.instance);
 }
 

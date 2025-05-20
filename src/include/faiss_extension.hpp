@@ -16,7 +16,6 @@ public:
 	static std::unordered_map<std::string, CreateParamHandler> create_param_handlers;
 
 	static void RegisterMetricType();
-	static void RegisterEfConstruction();
 };
 
 } // namespace duckdb
