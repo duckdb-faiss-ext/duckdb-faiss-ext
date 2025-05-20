@@ -764,7 +764,7 @@ void ProcessSelectionvector(unique_ptr<DataChunk> &chunk, std::vector<uint8_t> &
 	// If the input is not sequential or alligned, use the slow path
 	if (!sequential) {
 		uint64_t *__restrict idBytes = (uint64_t *)ids.GetData();
-		for (idx_t i = 0; i < size; i++) {
+		for (int i = 0; i < size; i++) {
 			uint64_t id = idBytes[i];
 			int arrIndex = id / 8;
 			int u8Index = id % 8;
@@ -838,7 +838,7 @@ static unique_ptr<TableFunctionData> SelBind(ClientContext &context, TableFuncti
 	auto &object_cache = ObjectCache::GetObjectCache(context);
 	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data->key);
 	if (!entry_ptr) {
-	    throw InvalidInputException("Could not find index %s.", bind_data->key);
+		throw InvalidInputException("Could not find index %s.", bind_data->key);
 	}
 
 	return std::move(bind_data);
