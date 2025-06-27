@@ -1,0 +1,33 @@
+# name: test/sql/faiss.test
+# description: test faiss extension
+# group: [faiss]
+
+require faiss
+
+statement error
+CALL faiss_create('flat8', 8, 'Flat', metric_type='Invalid');
+----
+Invalid Input Error: Unknown metric type: Invalid
+
+statement ok
+CALL faiss_create('flat8', 8, 'Flat', metric_type='L2');
+
+statement ok
+CREATE TABLE training AS SELECT * FROM 'test/sql/training.csv';
+
+statement ok
+CREATE TABLE queries AS SELECT * FROM 'test/sql/training.csv';
+
+statement ok
+SELECT * FROM queries WHERE column0 > 10
+
+statement error
+CALL faiss_add((SELECT column0, list_value(column1, column2, column3, column4, column5, column6, column7, column8) emb FROM training), 'flat8')
+----
+Invalid Input Error: Unable to add data: This type of index does not support adding with IDs. Consider prefixing the index string with IDMap when creating the index.
+
+statement ok
+CALL faiss_add((SELECT list_value(column1, column2, column3, column4, column5, column6, column7, column8) emb FROM training), 'flat8')
+
+statement ok
+CALL faiss_destroy('flat8');

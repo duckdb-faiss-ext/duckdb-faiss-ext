@@ -41,24 +41,57 @@
 #include "index.hpp"
 #include "maputils.hpp"
 
-#include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 #define DUCKDB_EXTENSION_MAIN
 
 namespace duckdb {
 
-// Create function
+using metric_type_map_t = case_insensitive_map_t<faiss::MetricType>;
 
+extern const metric_type_map_t LookupTable;
+
+const metric_type_map_t LookupTable = {
+    {"INNER_PRODUCT", faiss::METRIC_INNER_PRODUCT},
+    {"L2", faiss::METRIC_L2},
+    {"L1", faiss::METRIC_L1},
+    {"Linf", faiss::METRIC_Linf},
+    {"Lp", faiss::METRIC_Lp},
+    {"Canberra", faiss::METRIC_Canberra},
+    {"BrayCurtis", faiss::METRIC_BrayCurtis},
+    {"JensenShannon", faiss::METRIC_JensenShannon},
+    {"Jaccard", faiss::METRIC_Jaccard},
+};
+
+// Create function
 struct CreateFunctionData : public TableFunctionData {
 	string key;
 	int dimension = 0;
 	string description;
+	faiss::MetricType metricType;
 	shared_ptr<Vector> indexParams = nullptr;
 	uint64_t paramCount = 0;
 };
+
+std::unordered_map<std::string, CreateParamHandler> FaissExtension::create_param_handlers;
+
+void FaissExtension::RegisterCreateParameter(const std::string &key, CreateParamHandler handler) {
+	create_param_handlers[key] = handler;
+}
+
+void FaissExtension::RegisterMetricType() {
+	FaissExtension::RegisterCreateParameter("metric_type", [](CreateFunctionData &result, const Value &val) {
+		auto it = LookupTable.find(val.GetValue<std::string>());
+		if (it == LookupTable.end()) {
+			throw InvalidInputException("Unknown metric type: %s", val.GetValue<std::string>());
+		}
+		result.metricType = it->second;
+	});
+}
 
 static unique_ptr<FunctionData> CreateBind(ClientContext &, TableFunctionBindInput &input,
                                            vector<LogicalType> &return_types, vector<string> &names) {
@@ -69,14 +102,28 @@ static unique_ptr<FunctionData> CreateBind(ClientContext &, TableFunctionBindInp
 	result->key = input.inputs[0].ToString();
 	result->dimension = input.inputs[1].GetValue<int>();
 	result->description = input.inputs[2].ToString();
+	result->metricType = faiss::METRIC_INNER_PRODUCT;
+
 	if (input.inputs.size() == 4) {
 		std::tie(result->indexParams, result->paramCount) = mapFromValue(input.inputs[3]);
+		D_ASSERT(result->indexParams);
 	}
 
+	for (const auto &kv : input.named_parameters) {
+		auto it = FaissExtension::create_param_handlers.find(kv.first);
+		if (it != FaissExtension::create_param_handlers.end()) {
+			it->second(*result, kv.second);
+		} else {
+			throw InvalidInputException("Unknown named parameter: %s", kv.first);
+		}
+	}
 	return std::move(result);
 }
 
 faiss::Index *setIndexParameters(faiss::Index *index, Vector *userParams, uint64_t paramCount) {
+	if (!userParams || paramCount == 0) {
+		return index;
+	}
 	faiss::IndexIDMap *idmap = dynamic_cast<faiss::IndexIDMap *>(index);
 	if (idmap) {
 		idmap->index = setIndexParameters(idmap->index, userParams, paramCount);
@@ -105,7 +152,7 @@ static void CreateFunction(ClientContext &context, TableFunctionInput &data_p, D
 	}
 
 	faiss::Index *index =
-	    faiss::index_factory(bind_data.dimension, bind_data.description.c_str(), faiss::METRIC_INNER_PRODUCT);
+	    faiss::index_factory(bind_data.dimension, bind_data.description.c_str(), bind_data.metricType);
 	index = setIndexParameters(index, bind_data.indexParams.get(), bind_data.paramCount);
 	auto entry = make_shared_ptr<IndexEntry>();
 	entry->index = unique_ptr<faiss::Index>(index);
@@ -976,6 +1023,7 @@ static void LoadInternal(DatabaseInstance &instance) {
 	{
 		TableFunction create_func("faiss_create", {LogicalType::VARCHAR, LogicalType::INTEGER, LogicalType::VARCHAR},
 		                          CreateFunction, CreateBind);
+		create_func.named_parameters["metric_type"] = LogicalType::VARCHAR;
 		CreateTableFunctionInfo create_info(create_func);
 		catalog.CreateTableFunction(*con.context, &create_info);
 	}
@@ -1112,6 +1160,7 @@ static void LoadInternal(DatabaseInstance &instance) {
 }
 
 void FaissExtension::Load(DuckDB &db) {
+	RegisterMetricType();
 	LoadInternal(*db.instance);
 }
 
