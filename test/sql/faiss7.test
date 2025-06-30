@@ -1,0 +1,25 @@
+# name: test/sql/faiss7.test
+# description: test small dataset search
+# group: [faiss]
+
+require faiss
+
+statement ok
+CREATE TABLE IF NOT EXISTS demo_table (
+    id INTEGER PRIMARY KEY,
+    document_id INTEGER,
+    text TEXT,
+    indexed BOOLEAN DEFAULT FALSE
+);
+
+statement ok
+CALL FAISS_CREATE('demo_index', 2, 'IDMap,Flat');
+
+statement ok
+INSERT INTO demo_table (id, document_id, text, indexed) VALUES (231, 1, '~\~K~E~A~L~B~U~F~O~V~T~D~Q', FALSE);
+
+statement ok
+CALL FAISS_ADD((SELECT id, vector FROM (VALUES (231,[0.0040321066, 0.023423655])) as tb(id, vector)), 'demo_index');
+
+statement ok
+SELECT * FROM UNNEST(FAISS_SEARCH_FILTER('demo_index', 2, [-0.04529257, 0.024853613], 'id%2==0', 'id', 'demo_table'));
