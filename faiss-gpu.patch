@@ -1,26 +1,13 @@
 diff --git a/faiss/gpu/CMakeLists.txt b/faiss/gpu/CMakeLists.txt
-index b84362266..777d724ba 100644
+index 0051f047f..39977f4a4 100644
 --- a/faiss/gpu/CMakeLists.txt
 +++ b/faiss/gpu/CMakeLists.txt
-@@ -333,7 +333,7 @@ else()
-   target_link_options(faiss_gpu PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/fatbin.ld")
+@@ -344,7 +344,7 @@ else()
+ 
  
    find_package(CUDAToolkit REQUIRED)
--  target_link_libraries(faiss_gpu PRIVATE CUDA::cudart CUDA::cublas
-+  target_link_libraries(faiss_gpu PRIVATE CUDA::cudart_static CUDA::cublas_static
-     $<$<BOOL:${FAISS_ENABLE_RAFT}>:raft::raft>
-     $<$<BOOL:${FAISS_ENABLE_RAFT}>:raft::compiled>
-     $<$<BOOL:${FAISS_ENABLE_RAFT}>:nvidia::cutlass::cutlass>
-diff --git a/faiss/gpu/utils/DeviceUtils.cu b/faiss/gpu/utils/DeviceUtils.cu
-index 7a22c09e8..39a7e71d7 100644
---- a/faiss/gpu/utils/DeviceUtils.cu
-+++ b/faiss/gpu/utils/DeviceUtils.cu
-@@ -30,7 +30,7 @@ void setCurrentDevice(int device) {
- int getNumDevices() {
-     int numDev = -1;
-     cudaError_t err = cudaGetDeviceCount(&numDev);
--    if (cudaErrorNoDevice == err) {
-+    if (cudaErrorNoDevice == err || cudaErrorInsufficientDriver == err) {
-         numDev = 0;
-     } else {
-         CUDA_VERIFY(err);
+-  target_link_libraries(faiss_gpu_objs PRIVATE CUDA::cudart CUDA::cublas $<$<BOOL:${FAISS_ENABLE_CUVS}>:cuvs::cuvs> $<$<BOOL:${FAISS_ENABLE_CUVS}>:OpenMP::OpenMP_CXX>)
++  target_link_libraries(faiss_gpu_objs PRIVATE CUDA::cudart_static CUDA::cublas_static $<BOOL:${FAISS_ENABLE_CUVS}>:OpenMP::OpenMP_CXX>)
+   target_compile_options(faiss_gpu_objs PRIVATE
+     $<$<COMPILE_LANGUAGE:CUDA>:-Xfatbin=-compress-all
+     --expt-extended-lambda --expt-relaxed-constexpr
