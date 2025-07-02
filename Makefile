@@ -28,35 +28,26 @@ ifeq ($(findstring $(DUCKDB_PLATFORM), linux_amd64 linux_arm64), $(DUCKDB_PLATFO
 
 ifeq ($(findstring $(DUCKDB_PLATFORM), linux_amd64), $(DUCKDB_PLATFORM))
 EXT_RELEASE_FLAGS:=-DCMAKE_CUDA_COMPILER=/usr/local/cuda-11.6/bin/nvcc
-else
-EXT_RELEASE_FLAGS:=-DCMAKE_CUDA_COMPILER=/usr/local/cuda-11.6/bin/nvcc -DCMAKE_CUDA_HOST_COMPILER=aarch64-linux-gnu-g++ -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=aarch64 -DCMAKE_SYSTEM_LIBRARY_PATH=/usr/aarch64-linux-gnu/lib
-endif
+prebuild:
+	dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel8/x86_64/cuda-rhel8.repo
+	dnf makecache
+	dnf module install nvidia-driver:11.6
+	cd faiss && git apply ../faiss-gpu.patch
 
-prebuild:
-	wget -qO - https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/7fa2af80.pub | apt-key add -
-	wget -qO - https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/3bf863cc.pub | apt-key add -
-	bash -c 'echo "deb http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/cross-linux-sbsa /" >> /etc/apt/sources.list.d/cuda.list'
-	bash -c 'echo "deb http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64 /" >> /etc/apt/sources.list.d/cuda.list'
-	apt-get update
-	DEBIAN_FRONTEND=noninteractive apt-get install -y -qq cuda-11-6 cuda-compiler-11.6 cuda-cross-sbsa-11-6
-	cd faiss && git apply ../faiss-gpu.patch
 else
-ifeq ($(findstring $(DUCKDB_PLATFORM), linux_amd64_gcc4), $(DUCKDB_PLATFORM))
-EXT_RELEASE_FLAGS:=-DCMAKE_CUDA_COMPILER=/usr/local/cuda-11.6/bin/nvcc
+EXT_RELEASE_FLAGS:=-DCMAKE_CUDA_COMPILER=/usr/local/cuda-11.6/bin/nvcc -DCMAKE_CUDA_HOST_COMPILER=aarch64-linux-gnu-g++ -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=aarch64
 prebuild:
-	yum -y install wget
-	yum-config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel7/x86_64/cuda-rhel7.repo
-#	ubuntu 18.04 sbsa doesn't support cuda versions above this
-	yum -y install cuda-11-6 cuda-compiler-11-6
+	dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel8/sbsa/cuda-rhel8.repo
+	dnf makecache
+	dnf module install nvidia-driver:11.6
 	cd faiss && git apply ../faiss-gpu.patch
-	cd duckdb && git apply ../duckdb_gcc4.patch
 endif
 endif
 ifeq ($(findstring $(DUCKDB_PLATFORM), osx_amd64 osx_arm64), $(DUCKDB_PLATFORM))
 export VCPKG_OVERLAY_TRIPLETS=$(pwd)"/overlay_triplets"
 prebuild:
 	mkdir -p overlay_triplets
-	cp vcpkg/triplets/x64-osx.cmake overlay_triplets/x64-osx.cmake
+	cp local_vcpkg_installation/triplets/x64-osx.cmake overlay_triplets/x64-osx.cmake
 	echo "set(VCPKG_OSX_DEPLOYMENT_TARGET 11.0)" >> overlay_triplets/x64-osx.cmake
 endif
 endif
