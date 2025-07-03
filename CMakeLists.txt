@@ -38,6 +38,7 @@ if(DUCKDB_FAISS_EXT_ENABLE_GPU_CUDA AND NOT UNIX OR APPLE)
 endif()
 
 set(DDBF_FAISS_NAME faiss)
+set(CMAKE_CXX_STANDARD 17) # Somehow cmake does not pick this up from faiss
 
 set(FAISS_ENABLE_PYTHON OFF)
 set(FAISS_ENABLE_GPU OFF)
