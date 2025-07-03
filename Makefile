@@ -32,6 +32,7 @@ prebuild:
 	dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel8/x86_64/cuda-rhel8.repo
 	dnf makecache -y
 	dnf search --showduplicates nvidia-driver
+	dnf search --showduplicates cuda-drivers
 	dnf module install -y nvidia-driver cuda-drivers
 	dnf install -y cuda-11-6 cuda-compiler-11-6
 	cd faiss && git apply ../faiss-gpu.patch
@@ -41,6 +42,7 @@ prebuild:
 	dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel8/sbsa/cuda-rhel8.repo
 	dnf makecache -y
 	dnf search --showduplicates nvidia-driver
+	dnf search --showduplicates cuda-drivers
 	dnf module install -y nvidia-driver cuda-drivers
 	dnf install -y cuda-11-6 cuda-compiler-11-6
 	cd faiss && git apply ../faiss-gpu.patch
