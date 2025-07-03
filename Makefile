@@ -31,7 +31,7 @@ EXT_RELEASE_FLAGS:=-DCMAKE_CUDA_COMPILER=/usr/local/cuda-11.6/bin/nvcc
 prebuild:
 	dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel8/x86_64/cuda-rhel8.repo
 	dnf makecache -y
-	dnf module install nvidia-driver:latest
+	dnf module install -y nvidia-driver:latest
 	dnf install -y cuda-11-6 cuda-compiler-11-6
 	cd faiss && git apply ../faiss-gpu.patch
 else
@@ -39,7 +39,7 @@ EXT_RELEASE_FLAGS:=-DCMAKE_CUDA_COMPILER=/usr/local/cuda-11.6/bin/nvcc -DCMAKE_C
 prebuild:
 	dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel8/sbsa/cuda-rhel8.repo
 	dnf makecache -y
-	dnf module install nvidia-driver:latest
+	dnf module install -y nvidia-driver:latest
 	dnf install -y cuda-11-6 cuda-compiler-11-6
 	cd faiss && git apply ../faiss-gpu.patch
 endif
