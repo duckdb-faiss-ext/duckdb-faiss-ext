@@ -25,19 +25,12 @@ prebuild:
 
 ifneq ($(DUCKDB_PLATFORM), )
 ifeq ($(findstring $(DUCKDB_PLATFORM), linux_amd64 linux_arm64), $(DUCKDB_PLATFORM))
-
 ifeq ($(findstring $(DUCKDB_PLATFORM), linux_amd64), $(DUCKDB_PLATFORM))
-EXT_RELEASE_FLAGS:=-DCMAKE_CUDA_COMPILER=/usr/local/cuda-11.6/bin/nvcc
-prebuild:
-	dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel8/x86_64/cuda-rhel8.repo
-	dnf makecache -y
-	dnf search --showduplicates nvidia-driver
-	dnf search --showduplicates cuda-drivers
-	dnf module install -y nvidia-driver
-	dnf install -y cuda-toolkit-11-6
-	cd faiss && git apply ../faiss-gpu.patch
+AL8_REPO_ARCH:=x86_64
 else
-EXT_RELEASE_FLAGS:=-DCMAKE_CUDA_COMPILER=/usr/local/cuda-11.6/bin/nvcc -DCMAKE_CUDA_HOST_COMPILER=aarch64-linux-gnu-g++ -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=aarch64
+AL8_REPO_ARCH:=sbsa
+endif
+EXT_RELEASE_FLAGS:=-DCMAKE_CUDA_COMPILER=/usr/local/cuda-11.6/bin/nvcc
 prebuild:
 	dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel8/sbsa/cuda-rhel8.repo
 	dnf makecache -y
@@ -46,7 +39,6 @@ prebuild:
 	dnf module install -y nvidia-driver
 	dnf install -y cuda-toolkit-11-6
 	cd faiss && git apply ../faiss-gpu.patch
-endif
 endif
 ifeq ($(findstring $(DUCKDB_PLATFORM), osx_amd64 osx_arm64), $(DUCKDB_PLATFORM))
 export VCPKG_OVERLAY_TRIPLETS=$(pwd)"/overlay_triplets"
