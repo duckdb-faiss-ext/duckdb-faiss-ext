@@ -33,8 +33,8 @@ prebuild:
 	dnf makecache -y
 	dnf search --showduplicates nvidia-driver
 	dnf search --showduplicates cuda-drivers
-	dnf module install -y nvidia-driver cuda-drivers
-	dnf install -y cuda-11-6 cuda-compiler-11-6
+	dnf module install -y nvidia-driver
+	dnf install -y cuda-11-6 cuda-compiler-11-6 cuda-driver-devel-11-6
 	cd faiss && git apply ../faiss-gpu.patch
 else
 EXT_RELEASE_FLAGS:=-DCMAKE_CUDA_COMPILER=/usr/local/cuda-11.6/bin/nvcc -DCMAKE_CUDA_HOST_COMPILER=aarch64-linux-gnu-g++ -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=aarch64
@@ -43,8 +43,8 @@ prebuild:
 	dnf makecache -y
 	dnf search --showduplicates nvidia-driver
 	dnf search --showduplicates cuda-drivers
-	dnf module install -y nvidia-driver cuda-drivers
-	dnf install -y cuda-11-6 cuda-compiler-11-6
+	dnf module install -y nvidia-driver
+	dnf install -y cuda-11-6 cuda-compiler-11-6 cuda-driver-devel-11-6
 	cd faiss && git apply ../faiss-gpu.patch
 endif
 endif
