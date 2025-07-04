@@ -32,12 +32,10 @@ AL8_REPO_ARCH:=sbsa
 endif
 EXT_RELEASE_FLAGS:=-DCMAKE_CUDA_COMPILER=/usr/local/cuda-11.6/bin/nvcc
 prebuild:
-	dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel8/sbsa/cuda-rhel8.repo
+	dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel8/${AL8_REPO_ARCH}/cuda-rhel8.repo
 	dnf makecache -y
-	dnf search --showduplicates nvidia-driver
-	dnf search --showduplicates cuda-drivers
 	dnf module install -y nvidia-driver
-	dnf install -y cuda-toolkit-11-6
+	dnf install -y cuda-toolkit-12-9
 	cd faiss && git apply ../faiss-gpu.patch
 endif
 ifeq ($(findstring $(DUCKDB_PLATFORM), osx_amd64 osx_arm64), $(DUCKDB_PLATFORM))
@@ -46,6 +44,11 @@ prebuild:
 	mkdir -p overlay_triplets
 	cp local_vcpkg_installation/triplets/x64-osx.cmake overlay_triplets/x64-osx.cmake
 	echo "set(VCPKG_OSX_DEPLOYMENT_TARGET 11.0)" >> overlay_triplets/x64-osx.cmake
+endif
+ifeq ($(findstring $(DUCKDB_PLATFORM), windows_amd64_mingw), $(DUCKDB_PLATFORM))
+export VCPKG_OVERLAY_TRIPLETS=$(pwd)"/overlay_triplets"
+prebuild:
+	cd faiss && git apply ../faiss-mingw.patch
 endif
 endif
 
