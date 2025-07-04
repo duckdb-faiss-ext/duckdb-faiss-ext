@@ -44,7 +44,7 @@ prebuild:
 	dnf search --showduplicates nvidia-driver
 	dnf search --showduplicates cuda-drivers
 	dnf module install -y nvidia-driver
-	dnf install -y cuda-toolkip-11-6
+	dnf install -y cuda-toolkit-11-6
 	cd faiss && git apply ../faiss-gpu.patch
 endif
 endif
