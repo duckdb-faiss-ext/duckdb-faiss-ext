@@ -1,0 +1,27 @@
+diff --git a/faiss/impl/index_read.cpp b/faiss/impl/index_read.cpp
+index 775e8b951..c9dfcb2f2 100644
+--- a/faiss/impl/index_read.cpp
++++ b/faiss/impl/index_read.cpp
+@@ -79,7 +79,7 @@ bool read_vector_base(
+         const std::optional<size_t> beforeknown_size,
+         const std::optional<size_t> size_multiplier) {
+     // check if the use case is right
+-    if constexpr (is_maybe_owned_vector_v<VectorT>) {
++    if constexpr (is_maybe_owned_vector<VectorT>::value) {
+         // is it a mmap-enabled reader?
+         MappedFileIOReader* mf = dynamic_cast<MappedFileIOReader*>(f);
+         if (mf != nullptr) {
+diff --git a/faiss/impl/maybe_owned_vector.h b/faiss/impl/maybe_owned_vector.h
+index 4b6770dac..9d42a044a 100644
+--- a/faiss/impl/maybe_owned_vector.h
++++ b/faiss/impl/maybe_owned_vector.h
+@@ -295,9 +295,6 @@ struct is_maybe_owned_vector : std::false_type {};
+ template <typename T>
+ struct is_maybe_owned_vector<MaybeOwnedVector<T>> : std::true_type {};
+ 
+-template <typename T>
+-inline constexpr bool is_maybe_owned_vector_v = is_maybe_owned_vector<T>::value;
+-
+ template <typename T>
+ bool operator==(
+         const MaybeOwnedVector<T>& lhs,

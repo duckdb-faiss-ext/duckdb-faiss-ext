@@ -37,6 +37,7 @@ prebuild:
 	dnf module install -y nvidia-driver
 	dnf install -y cuda-toolkit-12-9
 	cd faiss && git apply ../faiss-gpu.patch
+	cd faiss && git apply ../faiss.patch
 endif
 ifeq ($(findstring -$(DUCKDB_PLATFORM)-, -osx_amd64- -osx_arm64-), -$(DUCKDB_PLATFORM)-)
 export VCPKG_OVERLAY_TRIPLETS=$(pwd)"/overlay_triplets"
@@ -44,11 +45,17 @@ prebuild:
 	mkdir -p overlay_triplets
 	cp local_vcpkg_installation/triplets/x64-osx.cmake overlay_triplets/x64-osx.cmake
 	echo "set(VCPKG_OSX_DEPLOYMENT_TARGET 11.0)" >> overlay_triplets/x64-osx.cmake
+	cd faiss && git apply ../faiss.patch
 endif
 ifeq ($(findstring -$(DUCKDB_PLATFORM)-, -windows_amd64_mingw-), -$(DUCKDB_PLATFORM)-)
 export VCPKG_OVERLAY_TRIPLETS=$(pwd)"/overlay_triplets"
 prebuild:
 	cd faiss && git apply ../faiss-mingw.patch
+	cd faiss && git apply ../faiss.patch
+endif
+ifeq ($(findstring -$(DUCKDB_PLATFORM)-, -windows_amd64-), -$(DUCKDB_PLATFORM)-)
+prebuild:
+	cd faiss && git apply ../faiss.patch
 endif
 endif
 
