@@ -38,7 +38,6 @@ if(DUCKDB_FAISS_EXT_ENABLE_GPU_CUDA AND NOT UNIX OR APPLE)
 endif()
 
 set(DDBF_FAISS_NAME faiss)
-set(CMAKE_CXX_STANDARD 17) # Somehow cmake does not pick this up from faiss
 
 set(FAISS_ENABLE_PYTHON OFF)
 set(FAISS_ENABLE_GPU OFF)
@@ -56,6 +55,7 @@ build_loadable_extension(${TARGET_NAME} "" ${EXTENSION_SOURCES})
 
 # link libraries
 add_subdirectory(faiss)
+# set_property(TARGET faiss PROPERTY CXX_STANDARD 11)
 
 if(DUCKDB_FAISS_EXT_ENABLE_GPU_CUDA)
   # If we are linking with faiss+GPU, we need access to cuda as well for the
