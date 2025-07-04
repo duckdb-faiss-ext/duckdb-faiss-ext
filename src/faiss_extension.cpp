@@ -939,8 +939,8 @@ void SearchFunctionFilter(DataChunk &input, ExpressionState &state, Vector &outp
 	string filterExpression = ss.str();
 
 	shared_ptr<DatabaseInstance> db = state.GetContext().db;
-	shared_ptr<ClientContext> subcommection = make_shared_ptr<ClientContext>(db);
-	unique_ptr<QueryResult> result = subcommection->Query(filterExpression, false);
+	Connection con = Connection(*db);
+	unique_ptr<QueryResult> result = con.SendQuery(filterExpression);
 
 	if (result->HasError()) {
 		throw InvalidInputException("uable to execute filter query: %s", result->GetError());

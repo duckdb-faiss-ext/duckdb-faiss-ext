@@ -37,12 +37,15 @@ if(DUCKDB_FAISS_EXT_ENABLE_GPU_CUDA AND NOT UNIX OR APPLE)
   set(DUCKDB_FAISS_EXT_ENABLE_GPU_CUDA FALSE)
 endif()
 
+set(DDBF_FAISS_NAME faiss)
+
 set(FAISS_ENABLE_PYTHON OFF)
 set(FAISS_ENABLE_GPU OFF)
 if(DUCKDB_FAISS_EXT_ENABLE_GPU_CUDA)
   set(FAISS_ENABLE_GPU ON)
   add_compile_definitions(DDBF_ENABLE_GPU)
   set(EXTENSION_SOURCES ${EXTENSION_SOURCES} ${EXTENSION_GPU_SOURCES})
+  set(DDBF_FAISS_NAME ${DDBF_FAISS_NAME} faiss_gpu_objs)
 endif()
 set(BUILD_TESTING OFF)
 
@@ -52,6 +55,7 @@ build_loadable_extension(${TARGET_NAME} "" ${EXTENSION_SOURCES})
 
 # link libraries
 add_subdirectory(faiss)
+# set_property(TARGET faiss PROPERTY CXX_STANDARD 11)
 
 if(DUCKDB_FAISS_EXT_ENABLE_GPU_CUDA)
   # If we are linking with faiss+GPU, we need access to cuda as well for the
@@ -86,7 +90,7 @@ else()
 endif()
 
 install(
-  TARGETS ${EXTENSION_NAME} faiss
+  TARGETS ${EXTENSION_NAME} ${DDBF_FAISS_NAME}
   EXPORT "${DUCKDB_EXPORT_SET}"
   LIBRARY DESTINATION "${INSTALL_LIB_DIR}"
   ARCHIVE DESTINATION "${INSTALL_LIB_DIR}")
