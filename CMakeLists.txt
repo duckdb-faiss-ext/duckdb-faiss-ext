@@ -55,7 +55,6 @@ build_loadable_extension(${TARGET_NAME} "" ${EXTENSION_SOURCES})
 
 # link libraries
 add_subdirectory(faiss)
-# set_property(TARGET faiss PROPERTY CXX_STANDARD 11)
 
 if(DUCKDB_FAISS_EXT_ENABLE_GPU_CUDA)
   # If we are linking with faiss+GPU, we need access to cuda as well for the

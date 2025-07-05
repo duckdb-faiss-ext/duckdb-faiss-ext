@@ -135,7 +135,7 @@ Note that saving/loading an index may remove the ability to add data to it or to
 CALL faiss_load(string name, string path);
 ```
 
- - `name`: The name given to the loaded index
+ - `name`: The name given to the loaded index.
  - `path`: The location of the index to be read.
 
 Note that saving/loading an index may remove the ability to add data to it or to train it. Only untrained indexes are mutable. (This is the case, because after the index is trained, we no longer know the training data.) This restriction might be eliminated in the future, when using the manual train function.
@@ -147,6 +147,18 @@ CALL faiss_destroy(string name, string path);
 ```
 
  - `name`: The name of the index to be destroyed
+
+## Moveing to GPU
+
+### faiss\_move\_gpu
+
+```sql
+CALL faiss_move_gpu(string name, int gpu_index);
+```
+
+ - `name`: The name given to the loaded index.
+ - `gpu_index`: The index of the gpu the faiss index to.
+
 
 ## Training and Adding
 
