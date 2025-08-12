@@ -1,9 +1,6 @@
 {
 	"dependencies": [
-		{
-			"name": "blas",
-			"platform": "!((windows & !mingw) & static)"
-		},
+		"openblas",
 		{
 			"name": "openblas",
 			"features": [
@@ -11,13 +8,5 @@
 			],
 			"platform": "!((windows & !mingw) & static)"
 		},
-		{
-			"name": "lapack",
-			"platform": "!((windows & !mingw) & static)"
-		},
-		{
-			"name": "intel-mkl",
-			"platform": "(windows & !mingw) & static"
-		}
 	]
 }

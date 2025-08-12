@@ -83,9 +83,9 @@ else()
   target_link_libraries(${EXTENSION_NAME} ${BLAS_LIBRARIES})
   target_link_libraries(${LOADABLE_EXTENSION_NAME} ${BLAS_LIBRARIES})
 
-  find_package(LAPACK REQUIRED)
-  target_link_libraries(${EXTENSION_NAME} ${LAPACK_LIBRARIES})
-  target_link_libraries(${LOADABLE_EXTENSION_NAME} ${LAPACK_LIBRARIES})
+  #  find_package(LAPACK REQUIRED)
+  #target_link_libraries(${EXTENSION_NAME} ${LAPACK_LIBRARIES})
+  #target_link_libraries(${LOADABLE_EXTENSION_NAME} ${LAPACK_LIBRARIES})
 endif()
 
 install(
