@@ -74,19 +74,19 @@ find_package(OpenMP REQUIRED)
 target_link_libraries(${EXTENSION_NAME} OpenMP::OpenMP_CXX)
 target_link_libraries(${LOADABLE_EXTENSION_NAME} OpenMP::OpenMP_CXX)
 
-find_package(MKL QUIET)
-if(MKL_FOUND)
-  target_link_libraries(${EXTENSION_NAME} ${MKL_LIBRARIES})
-  target_link_libraries(${LOADABLE_EXTENSION_NAME} ${MKL_LIBRARIES})
-else()
-  find_package(BLAS REQUIRED)
-  target_link_libraries(${EXTENSION_NAME} ${BLAS_LIBRARIES})
-  target_link_libraries(${LOADABLE_EXTENSION_NAME} ${BLAS_LIBRARIES})
+#find_package(MKL QUIET)
+#if(MKL_FOUND)
+#  target_link_libraries(${EXTENSION_NAME} ${MKL_LIBRARIES})
+#  target_link_libraries(${LOADABLE_EXTENSION_NAME} ${MKL_LIBRARIES})
+#else()
+#  find_package(BLAS REQUIRED)
+#  target_link_libraries(${EXTENSION_NAME} ${BLAS_LIBRARIES})
+#  target_link_libraries(${LOADABLE_EXTENSION_NAME} ${BLAS_LIBRARIES})
 
   #  find_package(LAPACK REQUIRED)
   #target_link_libraries(${EXTENSION_NAME} ${LAPACK_LIBRARIES})
   #target_link_libraries(${LOADABLE_EXTENSION_NAME} ${LAPACK_LIBRARIES})
-endif()
+  #endif()
 
 install(
   TARGETS ${EXTENSION_NAME} ${DDBF_FAISS_NAME}

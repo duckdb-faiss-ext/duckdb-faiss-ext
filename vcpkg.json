@@ -7,6 +7,6 @@
 				"openmp"
 			],
 			"platform": "!((windows & !mingw) & static)"
-		},
+		}
 	]
 }
