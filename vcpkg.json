@@ -8,6 +8,6 @@
 			],
 			"platform": "!((windows & !mingw) & static)"
 		},
-		"clapack"
+		"lapack"
 	]
 }
