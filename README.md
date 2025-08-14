@@ -117,6 +117,19 @@ CALL faiss_create_params(string name, int dimension, string index_type, MAP<stri
  - `index_type`: The index type given to [the faiss index factory](https://github.com/facebookresearch/faiss/wiki/The-index-factory). 
  - `parameters`: The parameters of the index. For example passing `{'efConstruction': '1000'}` when creating an `HNSW` index, will set the efConstruction field to 1000. This is recursive, for example, when using an `IVF` with `HNSW`, `ivf.efConstruction` can be used to set the `efConstruction` value on the `HNSW` index. Note that currently, the implementation is verry limmited. Recursion is only implemented for `IDMap`, and only `efConstruction` is implemented for HNSW. No other parameters have been implemented yet, but these should be easy to add.
 
+Both `faiss_create` and `faiss_create_param` support the named parameter `metric_type` to specify how to calculate the distance between vectors.
+
+The following metric types are currently supported:
+- "INNER_PRODUCT": `faiss::METRIC_INNER_PRODUCT`
+- "L2": `faiss::METRIC_L2`
+- "L1": `faiss::METRIC_L1`
+- "Linf": `faiss::METRIC_Linf`
+- "Lp": `faiss::METRIC_Lp`
+- "Canberra": `faiss::METRIC_Canberra`
+- "BrayCurtis": `faiss::METRIC_BrayCurtis`
+- "JensenShannon": `faiss::METRIC_JensenShannon`
+- "Jaccard": `faiss::METRIC_Jaccard`
+
 ### faiss\_save
 
 ```sql

@@ -1,4 +1,4 @@
-# name: test/sql/faiss.test
+# name: test/sql/faiss3.test
 # description: test faiss extension
 # group: [faiss]
 

@@ -1,4 +1,4 @@
-# name: test/sql/faiss.test
+# name: test/sql/faiss6.test
 # description: test faiss extension
 # group: [faiss]
 
@@ -11,6 +11,9 @@ Invalid Input Error: Unknown metric type: Invalid
 
 statement ok
 CALL faiss_create('flat8', 8, 'Flat', metric_type='L2');
+
+statement ok
+CALL faiss_create_params('hnsw16', 8, 'HNSW16', map{'efConstruction': 32}, metric_type='INNER_PRODUCT');
 
 statement ok
 CREATE TABLE training AS SELECT * FROM 'test/sql/training.csv';
