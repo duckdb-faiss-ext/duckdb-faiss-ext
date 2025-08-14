@@ -572,11 +572,6 @@ static OperatorFinalizeResultType AddFinaliseFunction(ExecutionContext &context,
 	// AddFinaliseFunction already these are taken care of
 	entry.added = total_elements;
 
-	// This should reset if no data was added for some reason.
-	if (entry.custom_labels == TRUE && entry.index->ntotal == 0) {
-		entry_ptr.get()->custom_labels = UNDECIDED;
-	}
-
 	entry.add_lock.get()->unlock();
 
 	if (entry.add_data.size() == 0) {
@@ -587,6 +582,11 @@ static OperatorFinalizeResultType AddFinaliseFunction(ExecutionContext &context,
 	try {
 		entry.index->train((faiss::idx_t)total_elements, &entry.add_data[0]);
 	} catch (faiss::FaissException exception) {
+		// This should reset if no data was added for some reason.
+		if (entry.custom_labels == TRUE && entry.index->ntotal == 0) {
+			entry_ptr.get()->custom_labels = UNDECIDED;
+		}
+
 		entry.faiss_lock.get()->unlock();
 		std::string msg = exception.msg;
 		if (msg.find("should be at least as large as number of clusters") != std::string::npos) {
@@ -608,6 +608,7 @@ static OperatorFinalizeResultType AddFinaliseFunction(ExecutionContext &context,
 	} else {
 		entry.index->add(new_element_count, new_vector_data);
 	}
+
 	entry.faiss_lock.get()->unlock();
 
 	return OperatorFinalizeResultType::FINISHED;

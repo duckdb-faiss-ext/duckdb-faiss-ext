@@ -1,0 +1,11 @@
+# name: faiss_add_ids_with_train
+# description: test small dataset search
+# group: [faiss]
+
+require faiss
+
+statement ok
+CALL FAISS_CREATE('demo_index', 2, 'IDMap,IVF1,Flat');
+
+statement ok
+CALL FAISS_ADD((SELECT id, vector FROM (VALUES (231,[0.0040321066, 0.023423655])) as tb(id, vector)), 'demo_index');
