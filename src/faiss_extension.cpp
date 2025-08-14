@@ -1035,6 +1035,7 @@ static void LoadInternal(DatabaseInstance &instance) {
 		                          {LogicalType::VARCHAR, LogicalType::INTEGER, LogicalType::VARCHAR,
 		                           LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR)},
 		                          CreateFunction, CreateBind);
+		create_func.named_parameters["metric_type"] = LogicalType::VARCHAR;
 		CreateTableFunctionInfo create_info(create_func);
 		catalog.CreateTableFunction(*con.context, &create_info);
 	}
