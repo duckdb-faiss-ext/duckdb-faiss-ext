@@ -1173,7 +1173,7 @@ std::string FaissExtension::Name() {
 }
 
 std::string FaissExtension::Version() const {
-	return "0.10.0";
+	return "0.12.0";
 }
 
 } // namespace duckdb
