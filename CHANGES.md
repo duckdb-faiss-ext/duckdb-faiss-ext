@@ -2,4 +2,4 @@
 
  - Fix building on windows non-mingw
  - Fix error when loading labels with IDs combined with training
- - Add metrix_type
+ - Add metric_type
