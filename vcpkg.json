@@ -5,8 +5,7 @@
 			"name": "openblas",
 			"features": [
 				"openmp"
-			],
-			"platform": "!((windows & !mingw) & static)"
+			]
 		},
 		"lapack"
 	]
