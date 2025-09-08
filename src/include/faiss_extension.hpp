@@ -9,7 +9,7 @@ using CreateParamHandler = std::function<void(CreateFunctionData &, const Value 
 
 class FaissExtension : public Extension {
 public:
-	void Load(DuckDB &db) override;
+	void Load(ExtensionLoader &db) override;
 	std::string Name() override;
 	std::string Version() const override;
 	static void RegisterCreateParameter(const std::string &key, CreateParamHandler handler);

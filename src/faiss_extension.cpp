@@ -23,10 +23,10 @@
 #include "duckdb/main/prepared_statement.hpp"
 #include "duckdb/parallel/thread_context.hpp"
 #include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
-#include "duckdb/parser/parsed_data/create_table_function_info.hpp"
 #include "duckdb/planner/binder.hpp"
 #include "duckdb/planner/expression.hpp"
 #include "duckdb/storage/object_cache.hpp"
+#include "duckdb/main/extension/extension_loader.hpp"
 #include "faiss/Index.h"
 #include "faiss/IndexHNSW.h"
 #include "faiss/IndexIDMap.h"
@@ -147,14 +147,14 @@ static void CreateFunction(ClientContext &context, TableFunctionInput &data_p, D
 	auto &bind_data = data_p.bind_data->Cast<CreateFunctionData>();
 	auto &object_cache = ObjectCache::GetObjectCache(context);
 
-	if (object_cache.Get<IndexEntry>(bind_data.key)) {
+	if (object_cache.Get<FaissIndexEntry>(bind_data.key)) {
 		throw InvalidInputException("Index %s already exists.", bind_data.key);
 	}
 
 	faiss::Index *index =
 	    faiss::index_factory(bind_data.dimension, bind_data.description.c_str(), bind_data.metricType);
 	index = setIndexParameters(index, bind_data.indexParams.get(), bind_data.paramCount);
-	auto entry = make_shared_ptr<IndexEntry>();
+	auto entry = make_shared_ptr<FaissIndexEntry>();
 	entry->index = unique_ptr<faiss::Index>(index);
 	entry->needs_training = !entry->index.get()->is_trained;
 	entry->faiss_lock = unique_ptr<std::mutex>(new std::mutex());
@@ -189,7 +189,7 @@ static void SaveFunction(ClientContext &context, TableFunctionInput &data_p, Dat
 	SaveFunctionData bind_data = data_p.bind_data->Cast<SaveFunctionData>();
 	auto &object_cache = ObjectCache::GetObjectCache(context);
 
-	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data.key);
+	auto entry_ptr = object_cache.Get<FaissIndexEntry>(bind_data.key);
 	if (!entry_ptr) {
 		throw InvalidInputException("Could not find index %s.", bind_data.key);
 	}
@@ -225,12 +225,12 @@ static void LoadFunction(ClientContext &context, TableFunctionInput &data_p, Dat
 	LoadFunctionData bind_data = data_p.bind_data->Cast<LoadFunctionData>();
 	auto &object_cache = ObjectCache::GetObjectCache(context);
 
-	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data.key);
+	auto entry_ptr = object_cache.Get<FaissIndexEntry>(bind_data.key);
 	if (entry_ptr) {
 		throw InvalidInputException("Could not find index %s.", bind_data.key);
 	}
 
-	auto entry = make_shared_ptr<IndexEntry>();
+	auto entry = make_shared_ptr<FaissIndexEntry>();
 	entry->index = unique_ptr<faiss::Index>(faiss::read_index(bind_data.filename.c_str()));
 	entry->needs_training = !entry->index.get()->is_trained;
 	entry->faiss_lock = unique_ptr<std::mutex>(new std::mutex());
@@ -257,7 +257,7 @@ static void DestroyFunction(ClientContext &context, TableFunctionInput &data_p, 
 	auto &bind_data = data_p.bind_data->Cast<DestroyFunctionData>();
 	auto &object_cache = ObjectCache::GetObjectCache(context);
 
-	if (!object_cache.Get<IndexEntry>(bind_data.key)) {
+	if (!object_cache.Get<FaissIndexEntry>(bind_data.key)) {
 		throw InvalidInputException("Could not find index %s.", bind_data.key);
 	}
 
@@ -340,7 +340,7 @@ static OperatorResultType MTrainFunction(ExecutionContext &context, TableFunctio
 
 	auto bind_data = data_p.bind_data->Cast<MTrainData>();
 	auto &object_cache = ObjectCache::GetObjectCache(context.client);
-	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data.key);
+	auto entry_ptr = object_cache.Get<FaissIndexEntry>(bind_data.key);
 	if (!entry_ptr) {
 		throw InvalidInputException("Could not find index %s.", bind_data.key);
 	}
@@ -372,7 +372,7 @@ static OperatorFinalizeResultType MTrainFinaliseFunction(ExecutionContext &conte
 
 	auto bind_data = data_p.bind_data->Cast<MTrainData>();
 	auto &object_cache = ObjectCache::GetObjectCache(context.client);
-	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data.key);
+	auto entry_ptr = object_cache.Get<FaissIndexEntry>(bind_data.key);
 	if (!entry_ptr) {
 		throw InvalidInputException("Could not find index %s.", bind_data.key);
 	}
@@ -430,7 +430,7 @@ static unique_ptr<FunctionData> AddBind(ClientContext &context, TableFunctionBin
 	bind_data->key = input.inputs[1].ToString();
 
 	auto &object_cache = ObjectCache::GetObjectCache(context);
-	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data->key);
+	auto entry_ptr = object_cache.Get<FaissIndexEntry>(bind_data->key);
 	if (!entry_ptr) {
 		throw InvalidInputException("Could not find index %s.", bind_data->key);
 	}
@@ -463,7 +463,7 @@ static unique_ptr<LocalTableFunctionState> AddLocalInit(ExecutionContext &contex
                                                         GlobalTableFunctionState *global_state) {
 	auto bind_data = data_p.bind_data->Cast<AddData>();
 	auto &object_cache = ObjectCache::GetObjectCache(context.client);
-	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data.key);
+	auto entry_ptr = object_cache.Get<FaissIndexEntry>(bind_data.key);
 	if (!entry_ptr) {
 		throw InvalidInputException("Could not find index %s.", bind_data.key);
 	}
@@ -476,7 +476,7 @@ static OperatorResultType AddFunction(ExecutionContext &context, TableFunctionIn
                                       DataChunk &) {
 	auto bind_data = data_p.bind_data->Cast<AddData>();
 	auto &object_cache = ObjectCache::GetObjectCache(context.client);
-	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data.key);
+	auto entry_ptr = object_cache.Get<FaissIndexEntry>(bind_data.key);
 	if (!entry_ptr) {
 		throw InvalidInputException("Could not find index %s.", bind_data.key);
 	}
@@ -550,7 +550,7 @@ static OperatorFinalizeResultType AddFinaliseFunction(ExecutionContext &context,
                                                       DataChunk &) {
 	auto bind_data = data_p.bind_data->Cast<AddData>();
 	auto &object_cache = ObjectCache::GetObjectCache(context.client);
-	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data.key);
+	auto entry_ptr = object_cache.Get<FaissIndexEntry>(bind_data.key);
 	if (!entry_ptr) {
 		throw InvalidInputException("Could not find index %s.", bind_data.key);
 	}
@@ -616,9 +616,9 @@ static OperatorFinalizeResultType AddFinaliseFunction(ExecutionContext &context,
 
 // Search functions and helpers
 
-// Searches the faiss index contained in the IndexEntry using the given queries and inputdata and search params. The
+// Searches the faiss index contained in the FaissIndexEntry using the given queries and inputdata and search params. The
 // results are stored in the outputvector as a struct-type of the form {rank, id, distance}.
-void searchIntoVector(ClientContext &ctx, IndexEntry &entry, Vector inputdata, size_t nQueries, size_t nResults,
+void searchIntoVector(ClientContext &ctx, FaissIndexEntry &entry, Vector inputdata, size_t nQueries, size_t nResults,
                       faiss::SearchParameters *searchParams, Vector &output) {
 	unique_ptr<Vector> child_vec = ListVectorToFaiss(ctx, inputdata, nQueries, entry.index->d);
 	auto child_ptr = FlatVector::GetData<float>(*child_vec);
@@ -839,7 +839,7 @@ static unique_ptr<TableFunctionData> SelBind(ClientContext &context, TableFuncti
 	bind_data->key = input.inputs[2].ToString();
 
 	auto &object_cache = ObjectCache::GetObjectCache(context);
-	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data->key);
+	auto entry_ptr = object_cache.Get<FaissIndexEntry>(bind_data->key);
 	if (!entry_ptr) {
 		throw InvalidInputException("Could not find index %s.", bind_data->key);
 	}
@@ -880,7 +880,7 @@ static OperatorFinalizeResultType SelFinaliseFunction(ExecutionContext &context,
 
 	auto bind_data = data_p.bind_data->Cast<AddData>();
 	auto &object_cache = ObjectCache::GetObjectCache(context.client);
-	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data.key);
+	auto entry_ptr = object_cache.Get<FaissIndexEntry>(bind_data.key);
 	if (!entry_ptr) {
 		throw InvalidInputException("Could not find index %s.", bind_data.key);
 	}
@@ -900,7 +900,7 @@ void SearchFunction(DataChunk &input, ExpressionState &state, Vector &output) {
 	string key = input.data[0].GetValue(0).ToString();
 
 	auto &object_cache = ObjectCache::GetObjectCache(state.GetContext());
-	auto entry_ptr = object_cache.Get<IndexEntry>(key);
+	auto entry_ptr = object_cache.Get<FaissIndexEntry>(key);
 	if (!entry_ptr) {
 		throw InvalidInputException("Could not find index %s.", key);
 	}
@@ -924,7 +924,7 @@ void SearchFunctionFilter(DataChunk &input, ExpressionState &state, Vector &outp
 	auto &object_cache = ObjectCache::GetObjectCache(state.GetContext());
 	auto key = input.data[0].GetValue(0).ToString();
 
-	auto entry_ptr = object_cache.Get<IndexEntry>(key);
+	auto entry_ptr = object_cache.Get<FaissIndexEntry>(key);
 	if (!entry_ptr) {
 		throw InvalidInputException("Could not find index %s.", key);
 	}
@@ -971,7 +971,7 @@ void SearchFunctionFilterSet(DataChunk &input, ExpressionState &state, Vector &o
 	auto &object_cache = ObjectCache::GetObjectCache(state.GetContext());
 	auto key = input.data[0].GetValue(0).ToString();
 
-	auto entry_ptr = object_cache.Get<IndexEntry>(key);
+	auto entry_ptr = object_cache.Get<FaissIndexEntry>(key);
 	if (!entry_ptr) {
 		throw InvalidInputException("Could not find index %s.", key);
 	}
@@ -1018,154 +1018,132 @@ void SearchFunctionFilterSet(DataChunk &input, ExpressionState &state, Vector &o
 }
 
 // LoadInternal adds the faiss functions to the database
-static void LoadInternal(DatabaseInstance &instance) {
-	Connection con(instance);
-	con.BeginTransaction();
-	auto &catalog = Catalog::GetSystemCatalog(*con.context);
+static void LoadInternal(ExtensionLoader &loader) {
+	//Connection con(instance);
+	//con.BeginTransaction();
+	//auto &catalog = Catalog::GetSystemCatalog(*con.context);
 
 	{
 		TableFunction create_func("faiss_create", {LogicalType::VARCHAR, LogicalType::INTEGER, LogicalType::VARCHAR},
 		                          CreateFunction, CreateBind);
 		create_func.named_parameters["metric_type"] = LogicalType::VARCHAR;
-		CreateTableFunctionInfo create_info(create_func);
-		catalog.CreateTableFunction(*con.context, &create_info);
+		loader.RegisterFunction(create_func);
 	}
-
 	{
 		TableFunction create_func("faiss_create_params",
 		                          {LogicalType::VARCHAR, LogicalType::INTEGER, LogicalType::VARCHAR,
 		                           LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR)},
 		                          CreateFunction, CreateBind);
 		create_func.named_parameters["metric_type"] = LogicalType::VARCHAR;
-		CreateTableFunctionInfo create_info(create_func);
-		catalog.CreateTableFunction(*con.context, &create_info);
+		loader.RegisterFunction(create_func);
 	}
 #ifdef DDBF_ENABLE_GPU
 	{
-		TableFunction create_func("faiss_to_gpu", {LogicalType::VARCHAR, LogicalType::INTEGER}, MoveToGPUFunction,
+		TableFunction to_gpu_func("faiss_to_gpu", {LogicalType::VARCHAR, LogicalType::INTEGER}, MoveToGPUFunction,
 		                          MoveToGPUBind);
-		CreateTableFunctionInfo create_info(create_func);
-		catalog.CreateTableFunction(*con.context, &create_info);
+		loader.RegisterFunction(to_gpu_func);
 	}
 #endif
 	{
-		TableFunction save_function("faiss_save", {LogicalType::VARCHAR, LogicalType::VARCHAR}, SaveFunction, SaveBind);
-		CreateTableFunctionInfo add_info(save_function);
-		catalog.CreateTableFunction(*con.context, &add_info);
+	    TableFunction load_function("faiss_load", {LogicalType::VARCHAR, LogicalType::VARCHAR}, LoadFunction, LoadBind);
+		loader.RegisterFunction(load_function);
 	}
 
 	{
-		TableFunction load_function("faiss_load", {LogicalType::VARCHAR, LogicalType::VARCHAR}, LoadFunction, LoadBind);
-		CreateTableFunctionInfo add_info(load_function);
-		catalog.CreateTableFunction(*con.context, &add_info);
+	    TableFunction destroy_func("faiss_destroy", {LogicalType::VARCHAR}, DestroyFunction, DestroyBind);
+		loader.RegisterFunction(destroy_func);
 	}
 
 	{
-		TableFunction create_func("faiss_destroy", {LogicalType::VARCHAR}, DestroyFunction, DestroyBind);
-		CreateTableFunctionInfo create_info(create_func);
-		catalog.CreateTableFunction(*con.context, &create_info);
+	    TableFunction manual_train_function("faiss_manual_train", {LogicalType::TABLE, LogicalType::VARCHAR}, nullptr,
+	                                        MTrainBind, MTrainGlobalInit, MTrainLocalInit);
+	    manual_train_function.in_out_function = MTrainFunction;
+	    manual_train_function.in_out_function_final = MTrainFinaliseFunction;
+		loader.RegisterFunction(manual_train_function);
 	}
 
 	{
-		TableFunction manual_train_function("faiss_manual_train", {LogicalType::TABLE, LogicalType::VARCHAR}, nullptr,
-		                                    MTrainBind, MTrainGlobalInit, MTrainLocalInit);
-		manual_train_function.in_out_function = MTrainFunction;
-		manual_train_function.in_out_function_final = MTrainFinaliseFunction;
-		CreateTableFunctionInfo manual_train_info(manual_train_function);
-		catalog.CreateTableFunction(*con.context, &manual_train_info);
+	    TableFunction add_function("faiss_add", {LogicalType::TABLE, LogicalType::VARCHAR}, nullptr, AddBind,
+	                               AddGlobalInit, AddLocalInit);
+	    add_function.in_out_function = AddFunction;
+	    add_function.in_out_function_final = AddFinaliseFunction;
+		loader.RegisterFunction(add_function);
 	}
 
 	{
-		TableFunction add_function("faiss_add", {LogicalType::TABLE, LogicalType::VARCHAR}, nullptr, AddBind,
-		                           AddGlobalInit, AddLocalInit);
-		add_function.in_out_function = AddFunction;
-		add_function.in_out_function_final = AddFinaliseFunction;
-		CreateTableFunctionInfo add_info(add_function);
-		catalog.CreateTableFunction(*con.context, &add_info);
+	    child_list_t<LogicalType> struct_children;
+	    struct_children.emplace_back("rank", LogicalType::INTEGER);
+	    struct_children.emplace_back("label", LogicalType::BIGINT);
+	    struct_children.emplace_back("distance", LogicalType::FLOAT);
+	    auto return_type = LogicalType::LIST(LogicalType::STRUCT(std::move(struct_children)));
+
+	    vector<LogicalType> parameters = {LogicalType::VARCHAR, LogicalType::INTEGER,
+	                                      LogicalType::LIST(LogicalType::ANY)};
+
+	    ScalarFunction search_function("faiss_search", parameters, return_type, SearchFunction);
+		loader.RegisterFunction(search_function);
+
+	    parameters.push_back(LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR));
+	    ScalarFunction search_function2("faiss_search", parameters, return_type, SearchFunction);
+	    CreateScalarFunctionInfo search_info_params(search_function2);
+		loader.RegisterFunction(search_info_params);
 	}
 
 	{
-		child_list_t<LogicalType> struct_children;
-		struct_children.emplace_back("rank", LogicalType::INTEGER);
-		struct_children.emplace_back("label", LogicalType::BIGINT);
-		struct_children.emplace_back("distance", LogicalType::FLOAT);
-		auto return_type = LogicalType::LIST(LogicalType::STRUCT(std::move(struct_children)));
+	    child_list_t<LogicalType> struct_children;
+	    struct_children.emplace_back("rank", LogicalType::INTEGER);
+	    struct_children.emplace_back("label", LogicalType::BIGINT);
+	    struct_children.emplace_back("distance", LogicalType::FLOAT);
+	    auto return_type = LogicalType::LIST(LogicalType::STRUCT(std::move(struct_children)));
 
-		vector<LogicalType> parameters = {LogicalType::VARCHAR, LogicalType::INTEGER,
-		                                  LogicalType::LIST(LogicalType::ANY)};
+	    vector<LogicalType> parameters = {
+	        LogicalType::VARCHAR, LogicalType::INTEGER, LogicalType::LIST(LogicalType::ANY),
+	        LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR};
 
-		ScalarFunction search_function("faiss_search", parameters, return_type, SearchFunction);
-		CreateScalarFunctionInfo search_info(search_function);
-		catalog.CreateFunction(*con.context, search_info);
+	    ScalarFunction search_function("faiss_search_filter", parameters, return_type, SearchFunctionFilter);
+		loader.RegisterFunction(search_function);
 
-		parameters.push_back(LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR));
-		ScalarFunction search_function2("faiss_search", parameters, return_type, SearchFunction);
-		CreateScalarFunctionInfo search_info_params(search_function2);
-		search_info_params.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
-		catalog.CreateFunction(*con.context, search_info_params);
+	    parameters.push_back(LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR));
+	    ScalarFunction search_function_params("faiss_search_filter", parameters, return_type, SearchFunctionFilter);
+	    CreateScalarFunctionInfo search_info_params(search_function_params);
+	    search_info_params.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
+		loader.RegisterFunction(search_info_params);
 	}
 
 	{
-		child_list_t<LogicalType> struct_children;
-		struct_children.emplace_back("rank", LogicalType::INTEGER);
-		struct_children.emplace_back("label", LogicalType::BIGINT);
-		struct_children.emplace_back("distance", LogicalType::FLOAT);
-		auto return_type = LogicalType::LIST(LogicalType::STRUCT(std::move(struct_children)));
-
-		vector<LogicalType> parameters = {
-		    LogicalType::VARCHAR, LogicalType::INTEGER, LogicalType::LIST(LogicalType::ANY),
-		    LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR};
-
-		ScalarFunction search_function("faiss_search_filter", parameters, return_type, SearchFunctionFilter);
-		CreateScalarFunctionInfo search_info(search_function);
-		catalog.CreateFunction(*con.context, search_info);
-
-		parameters.push_back(LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR));
-		ScalarFunction search_function_params("faiss_search_filter", parameters, return_type, SearchFunctionFilter);
-		CreateScalarFunctionInfo search_info_params(search_function_params);
-		search_info_params.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
-		catalog.CreateFunction(*con.context, search_info_params);
+	    TableFunction create_mask_function("__faiss_create_mask", {LogicalType::TABLE, LogicalType::VARCHAR}, nullptr, AddBind,
+	                               SelGlobalInit, SelLocalInit);
+	    create_mask_function.in_out_function = SelFunction;
+	    create_mask_function.in_out_function_final = SelFinaliseFunction;
+		loader.RegisterFunction(create_mask_function);
 	}
 
 	{
-		TableFunction add_function("__faiss_create_mask", {LogicalType::TABLE, LogicalType::VARCHAR}, nullptr, AddBind,
-		                           SelGlobalInit, SelLocalInit);
-		add_function.in_out_function = SelFunction;
-		add_function.in_out_function_final = SelFinaliseFunction;
-		CreateTableFunctionInfo add_info(add_function);
-		catalog.CreateTableFunction(*con.context, &add_info);
+	    child_list_t<LogicalType> struct_children;
+	    struct_children.emplace_back("rank", LogicalType::INTEGER);
+	    struct_children.emplace_back("label", LogicalType::BIGINT);
+	    struct_children.emplace_back("distance", LogicalType::FLOAT);
+	    auto return_type = LogicalType::LIST(LogicalType::STRUCT(std::move(struct_children)));
+
+	    vector<LogicalType> parameters = {
+	        LogicalType::VARCHAR, LogicalType::INTEGER, LogicalType::LIST(LogicalType::ANY),
+	        LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR};
+
+	    ScalarFunction search_function("faiss_search_filter_set", parameters, return_type, SearchFunctionFilterSet);
+		loader.RegisterFunction(search_function);
+
+	    parameters.push_back(LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR));
+	    ScalarFunction search_function_filter_params("faiss_search_filter_set", parameters, return_type,
+	                                                 SearchFunctionFilterSet);
+	    CreateScalarFunctionInfo search_info_params(search_function_filter_params);
+	    search_info_params.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
+		loader.RegisterFunction(search_info_params);
 	}
-
-	{
-		child_list_t<LogicalType> struct_children;
-		struct_children.emplace_back("rank", LogicalType::INTEGER);
-		struct_children.emplace_back("label", LogicalType::BIGINT);
-		struct_children.emplace_back("distance", LogicalType::FLOAT);
-		auto return_type = LogicalType::LIST(LogicalType::STRUCT(std::move(struct_children)));
-
-		vector<LogicalType> parameters = {
-		    LogicalType::VARCHAR, LogicalType::INTEGER, LogicalType::LIST(LogicalType::ANY),
-		    LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR};
-
-		ScalarFunction search_function("faiss_search_filter_set", parameters, return_type, SearchFunctionFilterSet);
-		CreateScalarFunctionInfo search_info(search_function);
-		catalog.CreateFunction(*con.context, search_info);
-
-		parameters.push_back(LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR));
-		ScalarFunction search_function_filter_params("faiss_search_filter_set", parameters, return_type,
-		                                             SearchFunctionFilterSet);
-		CreateScalarFunctionInfo search_info_params(search_function_filter_params);
-		search_info_params.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
-		catalog.CreateFunction(*con.context, search_info_params);
-	}
-
-	// manual training
-	con.Commit();
 }
 
-void FaissExtension::Load(DuckDB &db) {
+void FaissExtension::Load(ExtensionLoader &loader) {
 	RegisterMetricType();
-	LoadInternal(*db.instance);
+	LoadInternal(loader);
 }
 
 std::string FaissExtension::Name() {
@@ -1180,16 +1158,7 @@ std::string FaissExtension::Version() const {
 
 extern "C" {
 
-DUCKDB_EXTENSION_API void faiss_init(duckdb::DatabaseInstance &db) {
-	duckdb::DuckDB db_wrapper(db);
-	db_wrapper.LoadExtension<duckdb::FaissExtension>();
-}
-
-DUCKDB_EXTENSION_API const char *faiss_version() {
-	return duckdb::DuckDB::LibraryVersion();
+DUCKDB_CPP_EXTENSION_ENTRY(faiss, loader) {
+	duckdb::LoadInternal(loader);
 }
 }
-
-#ifndef DUCKDB_EXTENSION_MAIN
-#error DUCKDB_EXTENSION_MAIN not defined
-#endif
