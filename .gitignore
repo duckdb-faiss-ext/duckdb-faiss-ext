@@ -10,3 +10,4 @@ libomp
 conformanceTests/index
 .cache
 indices
+compile_commands.json
