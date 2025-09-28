@@ -36,7 +36,6 @@ prebuild:
 	dnf makecache -y
 	dnf module install -y nvidia-driver
 	dnf install -y cuda-toolkit-12-9
-	cd faiss && git apply ../faiss-gpu.patch
 	cd faiss && git apply ../faiss.patch
 endif
 ifeq ($(findstring -$(DUCKDB_PLATFORM)-, -osx_amd64- -osx_arm64-), -$(DUCKDB_PLATFORM)-)
