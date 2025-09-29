@@ -35,7 +35,7 @@ void MoveToGPUFunction(ClientContext &context, TableFunctionInput &data_p, DataC
 	auto &bind_data = data_p.bind_data->Cast<MoveToGPUDate>();
 	auto &object_cache = ObjectCache::GetObjectCache(context);
 
-	auto entry_ptr = object_cache.Get<IndexEntry>(bind_data.key);
+	auto entry_ptr = object_cache.Get<FaissIndexEntry>(bind_data.key);
 	if (!entry_ptr) {
 		throw InvalidInputException("Could not find index %s.", bind_data.key);
 	}
