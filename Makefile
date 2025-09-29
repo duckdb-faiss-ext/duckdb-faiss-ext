@@ -49,7 +49,6 @@ endif
 ifeq ($(findstring -$(DUCKDB_PLATFORM)-, -windows_amd64_mingw-), -$(DUCKDB_PLATFORM)-)
 export VCPKG_OVERLAY_TRIPLETS=$(pwd)"/overlay_triplets"
 prebuild:
-	cd faiss && git apply ../faiss-mingw.patch
 	cd faiss && git apply ../faiss.patch
 endif
 ifeq ($(findstring -$(DUCKDB_PLATFORM)-, -windows_amd64-), -$(DUCKDB_PLATFORM)-)
