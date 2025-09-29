@@ -36,7 +36,6 @@ prebuild:
 	dnf makecache -y
 	dnf module install -y nvidia-driver
 	dnf install -y cuda-toolkit-12-9
-	cd faiss && git apply ../faiss-gpu.patch
 	cd faiss && git apply ../faiss.patch
 endif
 ifeq ($(findstring -$(DUCKDB_PLATFORM)-, -osx_amd64- -osx_arm64-), -$(DUCKDB_PLATFORM)-)
@@ -50,7 +49,6 @@ endif
 ifeq ($(findstring -$(DUCKDB_PLATFORM)-, -windows_amd64_mingw-), -$(DUCKDB_PLATFORM)-)
 export VCPKG_OVERLAY_TRIPLETS=$(pwd)"/overlay_triplets"
 prebuild:
-	cd faiss && git apply ../faiss-mingw.patch
 	cd faiss && git apply ../faiss.patch
 endif
 ifeq ($(findstring -$(DUCKDB_PLATFORM)-, -windows_amd64-), -$(DUCKDB_PLATFORM)-)

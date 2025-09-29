@@ -17,10 +17,10 @@ concurrency:
 jobs:
   duckdb-stable-build:
     name: Build extension binaries
-    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.3.1
+    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.4.0
     with:
-      duckdb_version: v1.3.1
-      ci_tools_version: v1.3.1
+      duckdb_version: v1.4.0
+      ci_tools_version: v1.4.0
       extension_name: faiss
       vcpkg_url: "https://github.com/jaicewizard/vcpkg.git"
       vcpkg_commit: dfed91ee008f9496ad95d60a2a81d52d3b87eb6d

@@ -1,3 +1,4 @@
+#include "duckdb/storage/object_cache.hpp"
 #include "faiss/Index.h"
 
 namespace duckdb {
@@ -8,7 +9,7 @@ enum LABELSTATE {
 	TRUE,
 };
 
-struct IndexEntry : ObjectCacheEntry {
+struct FaissIndexEntry : ObjectCacheEntry {
 	unique_ptr<std::mutex>
 	    faiss_lock; // c++11 doesnt have a shared_mutex, introduced in c++14. duckdb is build with c++11
 	unique_ptr<faiss::Index> index;
@@ -50,7 +51,7 @@ struct IndexEntry : ObjectCacheEntry {
 	}
 
 	string GetObjectType() override {
-		return IndexEntry::ObjectType();
+		return FaissIndexEntry::ObjectType();
 	}
 };
 } // namespace duckdb
