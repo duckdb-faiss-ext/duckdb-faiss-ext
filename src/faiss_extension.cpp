@@ -1023,9 +1023,7 @@ void SearchFunctionFilterSet(DataChunk &input, ExpressionState &state, Vector &o
 
 // LoadInternal adds the faiss functions to the database
 static void LoadInternal(ExtensionLoader &loader) {
-	// Connection con(instance);
-	// con.BeginTransaction();
-	// auto &catalog = Catalog::GetSystemCatalog(*con.context);
+	FaissExtension::RegisterMetricType();
 
 	{
 		TableFunction create_func("faiss_create", {LogicalType::VARCHAR, LogicalType::INTEGER, LogicalType::VARCHAR},
@@ -1151,7 +1149,6 @@ static void LoadInternal(ExtensionLoader &loader) {
 }
 
 void FaissExtension::Load(ExtensionLoader &loader) {
-	RegisterMetricType();
 	LoadInternal(loader);
 }
 
