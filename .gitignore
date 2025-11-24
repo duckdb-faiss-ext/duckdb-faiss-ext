@@ -12,3 +12,4 @@ conformanceTests
 .cache
 indices
 vcpkg_installed
+compile_commands.json
