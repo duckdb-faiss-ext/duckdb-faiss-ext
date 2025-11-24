@@ -1,5 +1,8 @@
 #include "faiss_extension.hpp"
 
+#include "duckdb.h"
+#include "duckdb/common/enums/operator_result_type.hpp"
+#include "duckdb/common/enums/vector_type.hpp"
 #include "duckdb/common/error_data.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/helper.hpp"
@@ -12,6 +15,7 @@
 #include "duckdb/common/types/vector.hpp"
 #include "duckdb/common/unique_ptr.hpp"
 #include "duckdb/common/vector.hpp"
+#include "duckdb/common/vector_size.hpp"
 #include "duckdb/execution/execution_context.hpp"
 #include "duckdb/execution/expression_executor.hpp"
 #include "duckdb/function/function.hpp"
@@ -41,10 +45,13 @@
 #include "index.hpp"
 #include "maputils.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <string>
+#include <sys/types.h>
 #include <unordered_map>
 #include <vector>
 #define DUCKDB_EXTENSION_MAIN
@@ -615,52 +622,6 @@ static OperatorFinalizeResultType AddFinaliseFunction(ExecutionContext &context,
 }
 
 // Search functions and helpers
-
-// Searches the faiss index contained in the FaissIndexEntry using the given queries and inputdata and search params.
-// The results are stored in the outputvector as a struct-type of the form {rank, id, distance}.
-void searchIntoVector(ClientContext &ctx, FaissIndexEntry &entry, Vector inputdata, size_t nQueries, size_t nResults,
-                      faiss::SearchParameters *searchParams, Vector &output) {
-	unique_ptr<Vector> child_vec = ListVectorToFaiss(ctx, inputdata, nQueries, entry.index->d);
-	auto child_ptr = FlatVector::GetData<float>(*child_vec);
-
-	unique_ptr<faiss::idx_t[]> labels = unique_ptr<faiss::idx_t[]>(new faiss::idx_t[nQueries * nResults]);
-	unique_ptr<float[]> distances = unique_ptr<float[]>(new float[nQueries * nResults]);
-
-	entry.faiss_lock.get()->lock(); //  this should be a readlock once c++17 is supported
-	try {
-		entry.index->search((faiss::idx_t)nQueries, child_ptr, nResults, distances.get(), labels.get(), searchParams);
-	} catch (faiss::FaissException exception) {
-		entry.faiss_lock.get()->unlock();
-		std::string msg = exception.msg;
-		throw InvalidInputException("Error occured while searching: %s", msg);
-	}
-
-	entry.faiss_lock.get()->unlock();
-
-	ListVector::SetListSize(output, nQueries * nResults);
-	ListVector::Reserve(output, nQueries * nResults);
-	list_entry_t *list_ptr = ListVector::GetData(output);
-	Vector &result_struct_vector = ListVector::GetEntry(output);
-	vector<unique_ptr<Vector>> &struct_entries = StructVector::GetEntries(result_struct_vector);
-	int *rank_ptr = FlatVector::GetData<int32_t>(*struct_entries[0]);
-	int64_t *label_ptr = FlatVector::GetData<int64_t>(*struct_entries[1]);
-	float *distance_ptr = FlatVector::GetData<float>(*struct_entries[2]);
-
-	idx_t list_offset = 0;
-
-	for (idx_t row_idx = 0; row_idx < nQueries; row_idx++) {
-		list_ptr[row_idx].length = nResults;
-		list_ptr[row_idx].offset = list_offset;
-
-		for (idx_t res_idx = 0; res_idx < nResults; res_idx++) {
-			rank_ptr[list_offset + res_idx] = (int32_t)res_idx;
-			label_ptr[list_offset + res_idx] = labels[row_idx * nResults + res_idx];
-			distance_ptr[list_offset + res_idx] = distances[row_idx * nResults + res_idx];
-		}
-		list_offset += nResults;
-	}
-}
-
 vector<shared_ptr<faiss::SearchParameters>> innerCreateSearchParameters(faiss::Index *index,
                                                                         faiss::IDSelector *selector, Vector *userParams,
                                                                         uint64_t paramCount, string prefix) {
@@ -896,6 +857,217 @@ static OperatorFinalizeResultType SelFinaliseFunction(ExecutionContext &context,
 	return OperatorFinalizeResultType::FINISHED;
 }
 
+// Search function
+
+struct SearchFunctionData : public TableFunctionData {
+	string key;
+	size_t nResults;
+	shared_ptr<Vector> userParams = nullptr;
+	uint64_t paramCount = 0;
+};
+
+struct SearchLocalState : public LocalTableFunctionState {
+	// Number of results that are stored in total
+	uint64_t total_results = 0;
+	// Number of results that have been retreived already
+	uint64_t used_results = 0;
+
+	// Length of nResults * STANDARD_VECTOR_SIZE
+	int32_t *rank_ptr;
+	int64_t *label_ptr;
+	float *distance_ptr;
+};
+
+// Searches the faiss index contained in the FaissIndexEntry using the given queries and inputdata and search params.
+// The results are stored in the outputvector as a struct-type of the form {rank, id, distance}.
+void searchIntoVector(ClientContext &ctx, FaissIndexEntry &entry, Vector inputdata, size_t nQueries, size_t nResults,
+                      faiss::SearchParameters *searchParams, Vector &output) {
+	unique_ptr<Vector> child_vec = ListVectorToFaiss(ctx, inputdata, nQueries, entry.index->d);
+	auto child_ptr = FlatVector::GetData<float>(*child_vec);
+
+	unique_ptr<faiss::idx_t[]> labels = unique_ptr<faiss::idx_t[]>(new faiss::idx_t[nQueries * nResults]);
+	unique_ptr<float[]> distances = unique_ptr<float[]>(new float[nQueries * nResults]);
+
+	entry.faiss_lock.get()->lock(); //  this should be a readlock once c++17 is supported
+	try {
+		entry.index->search((faiss::idx_t)nQueries, child_ptr, nResults, distances.get(), labels.get(), searchParams);
+	} catch (faiss::FaissException exception) {
+		entry.faiss_lock.get()->unlock();
+		std::string msg = exception.msg;
+		throw InvalidInputException("Error occured while searching: %s", msg);
+	}
+
+	entry.faiss_lock.get()->unlock();
+
+	ListVector::SetListSize(output, nQueries * nResults);
+	ListVector::Reserve(output, nQueries * nResults);
+	list_entry_t *list_ptr = ListVector::GetData(output);
+	Vector &result_struct_vector = ListVector::GetEntry(output);
+	vector<unique_ptr<Vector>> &struct_entries = StructVector::GetEntries(result_struct_vector);
+	int32_t *rank_ptr = FlatVector::GetData<int32_t>(*struct_entries[0]);
+	int64_t *label_ptr = FlatVector::GetData<int64_t>(*struct_entries[1]);
+	float *distance_ptr = FlatVector::GetData<float>(*struct_entries[2]);
+
+	idx_t list_offset = 0;
+
+	for (idx_t row_idx = 0; row_idx < nQueries; row_idx++) {
+		list_ptr[row_idx].length = nResults;
+		list_ptr[row_idx].offset = list_offset;
+
+		for (idx_t res_idx = 0; res_idx < nResults; res_idx++) {
+			rank_ptr[list_offset + res_idx] = res_idx;
+			label_ptr[list_offset + res_idx] = labels[row_idx * nResults + res_idx];
+			distance_ptr[list_offset + res_idx] = distances[row_idx * nResults + res_idx];
+		}
+		list_offset += nResults;
+	}
+
+	if (nQueries <= 1) {
+		output.SetVectorType(VectorType::CONSTANT_VECTOR);
+	}
+}
+
+// Searches the faiss index contained in the FaissIndexEntry using the given queries and inputdata and search params.
+// The results are stored in the outputvector as a struct-type of the form {rank, id, distance}.
+void searchIntoPtrs(ClientContext &ctx, FaissIndexEntry &entry, Vector inputdata, size_t nQueries, size_t nResults,
+                    faiss::SearchParameters *searchParams, SearchLocalState &local_state) {
+	unique_ptr<Vector> child_vec = ListVectorToFaiss(ctx, inputdata, nQueries, entry.index->d);
+	auto child_ptr = FlatVector::GetData<float>(*child_vec);
+
+	entry.faiss_lock.get()->lock(); //  this should be a readlock once c++17 is supported
+	try {
+		entry.index->search((faiss::idx_t)nQueries, child_ptr, nResults, local_state.distance_ptr,
+		                    local_state.label_ptr, searchParams);
+	} catch (faiss::FaissException exception) {
+		entry.faiss_lock.get()->unlock();
+		std::string msg = exception.msg;
+		throw InvalidInputException("Error occured while searching: %s", msg);
+	}
+
+	entry.faiss_lock.get()->unlock();
+}
+
+static unique_ptr<FunctionData> SearchBind(ClientContext &context, TableFunctionBindInput &input,
+                                           vector<LogicalType> &return_types, vector<string> &names) {
+	return_types.emplace_back(LogicalType::INTEGER);
+	return_types.emplace_back(LogicalType::BIGINT);
+	return_types.emplace_back(LogicalType::FLOAT);
+	names.emplace_back("rank");
+	names.emplace_back("label");
+	names.emplace_back("distance");
+
+	auto result = make_uniq<SearchFunctionData>();
+	result->key = input.inputs[0].ToString();
+	result->nResults = input.inputs[1].GetValue<int32_t>();
+	if (input.inputs.size() == 4) {
+		std::tie(result->userParams, result->paramCount) = mapFromValue(input.inputs[3]);
+	}
+
+	return std::move(result);
+}
+static unique_ptr<LocalTableFunctionState> SearchLocalInit(ExecutionContext &context, TableFunctionInitInput &data_p,
+                                                           GlobalTableFunctionState *global_state) {
+	auto &bind_data = data_p.bind_data->Cast<SearchFunctionData>();
+
+	auto lstate = make_uniq<SearchLocalState>();
+	lstate->rank_ptr = (int32_t *)std::malloc(sizeof(int32_t) * bind_data.nResults * STANDARD_VECTOR_SIZE);
+	lstate->label_ptr = (int64_t *)std::malloc(sizeof(int64_t) * bind_data.nResults * STANDARD_VECTOR_SIZE);
+	lstate->distance_ptr = (float *)std::malloc(sizeof(float) * bind_data.nResults * STANDARD_VECTOR_SIZE);
+	return std::move(lstate);
+}
+
+static OperatorResultType SearchTFunction(ExecutionContext &context, TableFunctionInput &data_p, DataChunk &input,
+                                          DataChunk &output) {
+	auto &bind_data = data_p.bind_data->Cast<SearchFunctionData>();
+	auto &local_state = data_p.local_state->Cast<SearchLocalState>();
+	auto &object_cache = ObjectCache::GetObjectCache(context.client);
+
+	auto entry_ptr = object_cache.Get<FaissIndexEntry>(bind_data.key);
+	if (!entry_ptr) {
+		throw InvalidInputException("Could not find index %s.", bind_data.key);
+	}
+
+	auto &entry = *entry_ptr;
+	faiss::Index *index = &*entry.index;
+
+	input.data[0].Flatten(input.size());
+	size_t nQueries = FlatVector::Validity(input.data[0]).CountValid(input.size());
+
+	vector<shared_ptr<faiss::SearchParameters>> searchParams =
+	    createSearchParameters(entry_ptr->index.get(), NULL, bind_data.userParams.get(), bind_data.paramCount);
+
+	// If we used everything, it means we previously requested more inputs and should do a search
+	if (local_state.total_results == local_state.used_results) {
+		searchIntoPtrs(context.client, *entry_ptr, input.data[0], nQueries, bind_data.nResults, searchParams[0].get(),
+		               local_state);
+		local_state.total_results = nQueries * bind_data.nResults;
+		local_state.used_results = 0;
+	}
+
+	idx_t res_queries = std::min(local_state.total_results - local_state.used_results, (uint64_t)STANDARD_VECTOR_SIZE);
+
+	output.SetCapacity(res_queries);
+	output.SetCardinality(res_queries);
+	output.data[0].Initialize();
+	output.data[1].Initialize();
+	output.data[2].Initialize();
+
+	int32_t *rank_ptr = FlatVector::GetData<int32_t>(output.data[0]);
+	int64_t *label_ptr = FlatVector::GetData<int64_t>(output.data[1]);
+	float *distance_ptr = FlatVector::GetData<float>(output.data[2]);
+
+	for (idx_t o_idx = 0; o_idx < res_queries; o_idx++) {
+		idx_t i_idx = local_state.used_results + o_idx;
+		idx_t qid = (i_idx) % bind_data.nResults;
+		rank_ptr[o_idx] = qid;
+		label_ptr[o_idx] = local_state.label_ptr[i_idx];
+		distance_ptr[o_idx] = local_state.distance_ptr[i_idx];
+	}
+	local_state.used_results += res_queries;
+
+	if (local_state.used_results == local_state.total_results) {
+		return OperatorResultType::NEED_MORE_INPUT;
+	}
+	return OperatorResultType::HAVE_MORE_OUTPUT;
+}
+
+static OperatorFinalizeResultType SearchTFinaliseFunction(ExecutionContext &context, TableFunctionInput &data_p,
+                                                          DataChunk &output) {
+	auto &bind_data = data_p.bind_data->Cast<SearchFunctionData>();
+	auto &local_state = data_p.local_state->Cast<SearchLocalState>();
+	auto &object_cache = ObjectCache::GetObjectCache(context.client);
+	auto entry_ptr = object_cache.Get<FaissIndexEntry>(bind_data.key);
+	if (!entry_ptr) {
+		throw InvalidInputException("Could not find index %s.", bind_data.key);
+	}
+
+	auto &entry = *entry_ptr;
+	idx_t res_queries = std::min(local_state.total_results - local_state.used_results, (uint64_t)STANDARD_VECTOR_SIZE);
+
+	output.SetCapacity(res_queries);
+	output.SetCardinality(res_queries);
+	int32_t *rank_ptr = FlatVector::GetData<int32_t>(output.data[0]);
+	int64_t *label_ptr = FlatVector::GetData<int64_t>(output.data[1]);
+	float *distance_ptr = FlatVector::GetData<float>(output.data[2]);
+
+	for (idx_t o_idx = 0; o_idx < res_queries; o_idx++) {
+		idx_t i_idx = local_state.used_results + o_idx;
+		idx_t qid = (i_idx) % bind_data.nResults;
+		rank_ptr[o_idx] = qid;
+		label_ptr[o_idx] = local_state.label_ptr[i_idx];
+		distance_ptr[o_idx] = local_state.distance_ptr[i_idx];
+	}
+	local_state.used_results += res_queries;
+
+	if (local_state.used_results == local_state.total_results) {
+		free(local_state.distance_ptr);
+		free(local_state.label_ptr);
+		free(local_state.rank_ptr);
+		return OperatorFinalizeResultType::FINISHED;
+	}
+	return OperatorFinalizeResultType::HAVE_MORE_OUTPUT;
+}
+
 void SearchFunction(DataChunk &input, ExpressionState &state, Vector &output) {
 	string key = input.data[0].GetValue(0).ToString();
 
@@ -964,6 +1136,7 @@ void SearchFunctionFilter(DataChunk &input, ExpressionState &state, Vector &outp
 	}
 	vector<shared_ptr<faiss::SearchParameters>> searchParams =
 	    createSearchParameters(entry.index.get(), &selector, userParams.get(), paramCount);
+
 	searchIntoVector(state.GetContext(), entry, input.data[2], nQueries, nResults, searchParams[0].get(), output);
 }
 
@@ -1082,6 +1255,14 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 		ScalarFunction search_function("faiss_search", parameters, return_type, SearchFunction);
 		loader.RegisterFunction(search_function);
+		vector<LogicalType> parameters_ = {LogicalType::VARCHAR, LogicalType::INTEGER, LogicalType::TABLE};
+
+		TableFunction search_function_("faiss_search_table", parameters_, nullptr, SearchBind, nullptr,
+		                               SearchLocalInit);
+		search_function_.in_out_function = SearchTFunction;
+		search_function_.in_out_function_final = SearchTFinaliseFunction;
+
+		loader.RegisterFunction(search_function_);
 
 		parameters.push_back(LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR));
 		ScalarFunction search_function2("faiss_search", parameters, return_type, SearchFunction);
