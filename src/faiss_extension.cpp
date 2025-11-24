@@ -659,6 +659,10 @@ void searchIntoVector(ClientContext &ctx, FaissIndexEntry &entry, Vector inputda
 		}
 		list_offset += nResults;
 	}
+
+	if (nQueries <= 1) {
+		output.SetVectorType(VectorType::CONSTANT_VECTOR);
+	}
 }
 
 vector<shared_ptr<faiss::SearchParameters>> innerCreateSearchParameters(faiss::Index *index,
@@ -829,14 +833,14 @@ struct SelData : public TableFunctionData {
 	string key;
 };
 
-static unique_ptr<TableFunctionData> SelBind(ClientContext &context, TableFunctionBindInput &input,
-                                             vector<LogicalType> &return_types, vector<string> &names) {
-	auto bind_data = make_uniq<SelData>();
+static unique_ptr<FunctionData> SelBind(ClientContext &context, TableFunctionBindInput &input,
+                                        vector<LogicalType> &return_types, vector<string> &names) {
+	auto bind_data = make_uniq<AddData>();
 
 	return_types.emplace_back(LogicalType::BOOLEAN);
 	names.emplace_back("Success");
 
-	bind_data->key = input.inputs[2].ToString();
+	bind_data->key = input.inputs[1].ToString();
 
 	auto &object_cache = ObjectCache::GetObjectCache(context);
 	auto entry_ptr = object_cache.Get<FaissIndexEntry>(bind_data->key);
@@ -1045,6 +1049,10 @@ static void LoadInternal(ExtensionLoader &loader) {
 	}
 #endif
 	{
+		TableFunction save_function("faiss_save", {LogicalType::VARCHAR, LogicalType::VARCHAR}, SaveFunction, SaveBind);
+		loader.RegisterFunction(save_function);
+	}
+	{
 		TableFunction load_function("faiss_load", {LogicalType::VARCHAR, LogicalType::VARCHAR}, LoadFunction, LoadBind);
 		loader.RegisterFunction(load_function);
 	}
@@ -1113,7 +1121,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	{
 		TableFunction create_mask_function("__faiss_create_mask", {LogicalType::TABLE, LogicalType::VARCHAR}, nullptr,
-		                                   AddBind, SelGlobalInit, SelLocalInit);
+		                                   SelBind, SelGlobalInit, SelLocalInit);
 		create_mask_function.in_out_function = SelFunction;
 		create_mask_function.in_out_function_final = SelFinaliseFunction;
 		loader.RegisterFunction(create_mask_function);

@@ -10,7 +10,7 @@ CALL faiss_create('flat8', 8, 'Flat');
 
 
 statement ok
-CALL faiss_add((SELECT list_value(column1, column2, column3, column4, column5, column6, column7, column8) emb FROM 'test/sql/training.csv'), 'flat8')
+CALL faiss_add((SELECT list_value(column1, column2, column3, column4, column5, column6, column7, column8) emb FROM 'test/sql/training.csv'), 'flat8');
 
 
 query I
