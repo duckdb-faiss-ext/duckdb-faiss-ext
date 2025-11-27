@@ -8,5 +8,8 @@
 			]
 		},
 		"lapack"
+	],
+	"overlay-ports": [
+		"./vcpkg_ports"
 	]
 }

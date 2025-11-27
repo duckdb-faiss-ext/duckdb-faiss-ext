@@ -42,8 +42,10 @@ ifeq ($(findstring -$(DUCKDB_PLATFORM)-, -osx_amd64- -osx_arm64-), -$(DUCKDB_PLA
 export VCPKG_OVERLAY_TRIPLETS=$(pwd)"/overlay_triplets"
 prebuild:
 	mkdir -p overlay_triplets
-	cp local_vcpkg_installation/triplets/x64-osx.cmake overlay_triplets/x64-osx.cmake
+	cp local_vcpkg_installation/community/triplets/x64-osx.cmake overlay_triplets/x64-osx.cmake
+	cp local_vcpkg_installation/triplets/arm64-osx.cmake overlay_triplets/arm64-osx.cmake
 	echo "set(VCPKG_OSX_DEPLOYMENT_TARGET 11.0)" >> overlay_triplets/x64-osx.cmake
+	echo "set(VCPKG_OSX_DEPLOYMENT_TARGET 11.0)" >> overlay_triplets/arm64-osx.cmake
 	cd faiss && git apply ../faiss.patch
 endif
 ifeq ($(findstring -$(DUCKDB_PLATFORM)-, -windows_amd64_mingw-), -$(DUCKDB_PLATFORM)-)
