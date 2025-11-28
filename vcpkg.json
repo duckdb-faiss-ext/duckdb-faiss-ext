@@ -9,7 +9,9 @@
 		},
 		"lapack"
 	],
-	"overlay-ports": [
-		"./vcpkg_ports"
-	]
+	"vcpkg-configuration": {
+		"overlay-ports": [
+			"./vcpkg_ports"
+		]
+	}
 }
