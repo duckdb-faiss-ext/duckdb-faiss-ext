@@ -12,6 +12,9 @@
 	"vcpkg-configuration": {
 		"overlay-ports": [
 			"./vcpkg_ports"
+		],
+		"overlay-triplets": [
+			"./overlay_triplets"
 		]
 	}
 }
