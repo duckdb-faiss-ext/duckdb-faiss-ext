@@ -15,11 +15,6 @@ EXT_RELEASE_FLAGS=""
 
 include extension-ci-tools/makefiles/duckdb_extension.Makefile
 
-ifneq ("${FAISS_EXT_NO_GPU}", "TRUE")
-	EXT_FLAGS := -DDUCKDB_FAISS_EXT_ENABLE_GPU_CUDA=TRUE
-else
-	EXT_FLAGS := -DDUCKDB_FAISS_EXT_ENABLE_GPU_CUDA=FALSE
-endif
 
 prebuild:
 
@@ -37,6 +32,9 @@ prebuild:
 	dnf module install -y nvidia-driver
 	dnf install -y cuda-toolkit-12-9
 	cd faiss && git apply ../faiss.patch
+endif
+ifeq ($(findstring -$(DUCKDB_PLATFORM)-, -linux_amd64_musl-), -$(DUCKDB_PLATFORM)-)
+FAISS_EXT_NO_GPU=TRUE
 endif
 ifeq ($(findstring -$(DUCKDB_PLATFORM)-, -osx_amd64- -osx_arm64-), -$(DUCKDB_PLATFORM)-)
 prebuild:
@@ -56,6 +54,13 @@ prebuild:
 	cd faiss && git apply ../faiss.patch
 endif
 endif
+
+ifneq ("${FAISS_EXT_NO_GPU}", "TRUE")
+	EXT_FLAGS := -DDUCKDB_FAISS_EXT_ENABLE_GPU_CUDA=TRUE
+else
+	EXT_FLAGS := -DDUCKDB_FAISS_EXT_ENABLE_GPU_CUDA=FALSE
+endif
+
 
 release: prebuild
 
