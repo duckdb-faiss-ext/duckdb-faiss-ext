@@ -5,7 +5,8 @@
 			"name": "openblas",
 			"features": [
 				"openmp"
-			]
+			],
+			"platform": "!osx"
 		},
 		"lapack"
 	],
