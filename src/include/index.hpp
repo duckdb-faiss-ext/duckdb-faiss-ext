@@ -56,7 +56,7 @@ struct FaissIndexEntry : ObjectCacheEntry {
 
 	optional_idx GetEstimatedCacheMemory() const override {
 		// Per the docs of 1.5 returning invalid index (presumably negative) should prevent eviction
-		return -1;
+		return optional_idx {};
 	}
 };
 } // namespace duckdb
