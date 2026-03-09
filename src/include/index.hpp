@@ -53,9 +53,6 @@ struct FaissIndexEntry : ObjectCacheEntry {
 	string GetObjectType() override {
 		return FaissIndexEntry::ObjectType();
 	}
-#ifndef DUCKDB_MAJOR_VERSION
-#error "NO MAJOR VERSION"
-#endif
 #if DUCKDB_MAJOR_VERSION >= 2 || DUCKDB_MINOR_VERSION >= 5
 	optional_idx GetEstimatedCacheMemory() const override {
 		// Per the docs of 1.5 returning invalid index should prevent eviction
