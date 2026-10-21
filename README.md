@@ -261,7 +261,7 @@ CALL faiss_search_filter\_set(string name, integer k, List q, string filter, str
 And a variant with parameters:
 
 ```sql
-CALL faiss_search_filter_set(string name, integer k, List q, MAP<string, string> parameters);
+CALL faiss_search_filter_set(string name, integer k, List q, string filter, string idselector, string tablename, MAP<string, string> parameters);
 ```
 
  - `parameters`: The parameters for searching the index. For example passing `{'efSearch': '1000'}` when searching`HNSW` index, will set the efSearch field to 1000. This is recursive, for example, when using an `IVF` with `HNSW`, `ivf.efSearch` can be used to set the `efSearch` value for the `HNSW` index. Note that currently, the implementation is limited. Recursion is only implemented for `IDMap` and `IVF`, and a few fields are implemented only. (Other FAISS options would be easy to add.)

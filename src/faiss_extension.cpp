@@ -27,6 +27,7 @@
 #include "duckdb/main/prepared_statement.hpp"
 #include "duckdb/parallel/thread_context.hpp"
 #include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
+#include "duckdb/parser/parsed_data/create_table_function_info.hpp"
 #include "duckdb/planner/binder.hpp"
 #include "duckdb/planner/expression.hpp"
 #include "duckdb/storage/object_cache.hpp"
@@ -1043,7 +1044,15 @@ static void LoadInternal(ExtensionLoader &loader) {
 		                          CreateFunction, CreateBind);
 		AddMetricType(create_func);
 
-		loader.RegisterFunction(create_func);
+		CreateTableFunctionInfo create_func_info(create_func);
+		FunctionDescription desc {
+		    .parameter_names = {"name", "dimension", "index_type"},
+		    .description = "Creates a new index of the given dimension and type. Can be referenced later by the same "
+		                   "name. ",
+		    .examples = {"CALL faiss_create('flat8', 8, 'Flat');"},
+		};
+		create_func_info.descriptions.push_back(desc);
+		loader.RegisterFunction(std::move(create_func_info));
 	}
 	{
 		TableFunction create_func("faiss_create_params",
@@ -1052,27 +1061,70 @@ static void LoadInternal(ExtensionLoader &loader) {
 		                          CreateFunction, CreateBind);
 		AddMetricType(create_func);
 
-		loader.RegisterFunction(create_func);
+		CreateTableFunctionInfo create_func_info(create_func);
+		FunctionDescription desc {
+		    .parameter_names = {"name", "dimension", "index_type", "parameters"},
+		    .description = "Creates a new index of the given dimension and type. Can be referenced later by the same "
+		                   "name. Parameters contain parameters specific to the index.",
+		    .examples =
+		        {"CALL faiss_create('hnsw16', 8, 'HNSW16', map{'efConstruction': 32}, metric_type='INNER_PRODUCT');"},
+		};
+		create_func_info.descriptions.push_back(desc);
+		loader.RegisterFunction(std::move(create_func_info));
 	}
 #ifdef DDBF_ENABLE_GPU
 	{
 		TableFunction to_gpu_func("faiss_to_gpu", {LogicalType::VARCHAR, LogicalType::INTEGER}, MoveToGPUFunction,
 		                          MoveToGPUBind);
-		loader.RegisterFunction(to_gpu_func);
+
+		CreateTableFunctionInfo to_gpu_func_info(to_gpu_func);
+		FunctionDescription desc {
+		    .parameter_names = {"name", "deviceid"},
+		    .description = "Moves the named index to the GPU, for supported indices. Deviceid is the target GPU it "
+		                   "will be loaded on.",
+		    .examples = {"CALL faiss_to_gpu('hnsw16', 1);"},
+		};
+		to_gpu_func_info.descriptions.push_back(desc);
+		loader.RegisterFunction(std::move(to_gpu_func_info));
 	}
 #endif
 	{
 		TableFunction save_function("faiss_save", {LogicalType::VARCHAR, LogicalType::VARCHAR}, SaveFunction, SaveBind);
-		loader.RegisterFunction(save_function);
+
+		CreateTableFunctionInfo save_function_info(save_function);
+		FunctionDescription desc {
+		    .parameter_names = {"name", "path"},
+		    .description = "Saves the index to a given filepath. This can later be loaded into DuckDB again.",
+		    .examples = {"CALL faiss_save('hnsw16', 'index.faiss');"},
+		};
+		save_function_info.descriptions.push_back(desc);
+		loader.RegisterFunction(std::move(save_function_info));
 	}
 	{
 		TableFunction load_function("faiss_load", {LogicalType::VARCHAR, LogicalType::VARCHAR}, LoadFunction, LoadBind);
-		loader.RegisterFunction(load_function);
+
+		CreateTableFunctionInfo load_function_info(load_function);
+		FunctionDescription desc {
+		    .parameter_names = {"name", "path"},
+		    .description = "Load an index from the given filepath into Duckdb.",
+		    .examples = {"CALL faiss_load('hnsw16-2', 'index.faiss');"},
+		};
+		load_function_info.descriptions.push_back(desc);
+		loader.RegisterFunction(std::move(load_function_info));
 	}
 
 	{
 		TableFunction destroy_func("faiss_destroy", {LogicalType::VARCHAR}, DestroyFunction, DestroyBind);
-		loader.RegisterFunction(destroy_func);
+
+		CreateTableFunctionInfo destroy_func_info(destroy_func);
+		FunctionDescription desc {
+		    .parameter_names = {"name"},
+		    .description = "Destroy an index. Reffering to this name will give an error, unless a new index with this "
+		                   "name is created of loaded.",
+		    .examples = {"CALL faiss_destroy('hnsw16-2');"},
+		};
+		destroy_func_info.descriptions.push_back(desc);
+		loader.RegisterFunction(std::move(destroy_func_info));
 	}
 
 	{
@@ -1080,7 +1132,15 @@ static void LoadInternal(ExtensionLoader &loader) {
 		                                    MTrainBind, MTrainGlobalInit, MTrainLocalInit);
 		manual_train_function.in_out_function = MTrainFunction;
 		manual_train_function.in_out_function_final = MTrainFinaliseFunction;
-		loader.RegisterFunction(manual_train_function);
+
+		CreateTableFunctionInfo manual_train_function_info(manual_train_function);
+		FunctionDescription desc {
+		    .parameter_names = {"data", "name"},
+		    .description = "Train the index with the given data.",
+		    .examples = {"CALL faiss_manual_train(SELECT vectors from data, 'hnsw16');"},
+		};
+		manual_train_function_info.descriptions.push_back(desc);
+		loader.RegisterFunction(manual_train_function_info);
 	}
 
 	{
@@ -1088,7 +1148,15 @@ static void LoadInternal(ExtensionLoader &loader) {
 		                           AddGlobalInit, AddLocalInit);
 		add_function.in_out_function = AddFunction;
 		add_function.in_out_function_final = AddFinaliseFunction;
-		loader.RegisterFunction(add_function);
+
+		CreateTableFunctionInfo add_function_info(add_function);
+		FunctionDescription desc {
+		    .parameter_names = {"data", "name"},
+		    .description = "Add the given data to the index. If not yet trained manually, this happens as well.",
+		    .examples = {"CALL faiss_add(SELECT vectors from data, 'hnsw16');"},
+		};
+		add_function_info.descriptions.push_back(desc);
+		loader.RegisterFunction(add_function_info);
 	}
 
 	{
@@ -1102,13 +1170,30 @@ static void LoadInternal(ExtensionLoader &loader) {
 		                                  LogicalType::LIST(LogicalType::ANY)};
 
 		ScalarFunction search_function("faiss_search", parameters, return_type, SearchFunction);
-		loader.RegisterFunction(search_function);
+
+		CreateScalarFunctionInfo search_function_info(search_function);
+		FunctionDescription desc {
+		    .parameter_names = {"name", "k", "q"},
+		    .description = "Searches the index for the k (appriximate) closest points to q.",
+		    .examples = {"labels AS (SELECT UNNEST(faiss_search('hnsw16', 2, emb)).label lbl FROM queries)"},
+		};
+		search_function_info.descriptions.push_back(desc);
+		loader.RegisterFunction(search_function_info);
 
 		parameters.push_back(LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR));
-		ScalarFunction search_function2("faiss_search", parameters, return_type, SearchFunction);
-		CreateScalarFunctionInfo search_info_params(search_function2);
-		search_info_params.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
-		loader.RegisterFunction(search_info_params);
+		ScalarFunction search_function_params("faiss_search", parameters, return_type, SearchFunction);
+
+		CreateScalarFunctionInfo search_function_info2(search_function_params);
+		search_function_info2.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
+		FunctionDescription desc2 {
+		    .parameter_names = {"name", "k", "q", "params"},
+		    .description = "Searches the index for the k (appriximate) closest points to q. Params can be filled with "
+		                   "parameters that are passed onto the search function",
+		    .examples = {"labels AS (SELECT UNNEST(faiss_search('hnsw16', 2, emb, {'efSearch': '1000'})).label lbl "
+			             "FROM queries)"},
+		};
+		search_function_info2.descriptions.push_back(desc2);
+		loader.RegisterFunction(search_function_info2);
 	}
 
 	{
@@ -1123,13 +1208,37 @@ static void LoadInternal(ExtensionLoader &loader) {
 		    LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR};
 
 		ScalarFunction search_function("faiss_search_filter", parameters, return_type, SearchFunctionFilter);
-		loader.RegisterFunction(search_function);
+
+		CreateScalarFunctionInfo search_function_info(search_function);
+		FunctionDescription desc {
+		    .parameter_names = {"name", "k", "q", "filter", "idselector", "tablename"},
+		    .description = "Searches the index for the k (appriximate) closest points to q. Params can be filled with "
+		                   "parameters that are passed onto the search function. The filter is executed like 'SELECT "
+		                   "idselector FROM tablename WHERE filter>1'. idselector must match the ids given when "
+		                   "training the data.",
+		    .examples = {"labels AS (SELECT UNNEST(faiss_search_filter('hnsw16', 2, emb, {'efSearch': '1000'}, "
+			             "'id>100', 'id', 'data')).label lbl "
+			             "FROM queries)"},
+		};
+		search_function_info.descriptions.push_back(desc);
+		loader.RegisterFunction(search_function_info);
 
 		parameters.push_back(LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR));
 		ScalarFunction search_function_params("faiss_search_filter", parameters, return_type, SearchFunctionFilter);
-		CreateScalarFunctionInfo search_info_params(search_function_params);
-		search_info_params.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
-		loader.RegisterFunction(search_info_params);
+
+		CreateScalarFunctionInfo search_function_info2(search_function_params);
+		search_function_info2.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
+		FunctionDescription desc2 {
+		    .parameter_names = {"name", "k", "q", "params", "filter", "idselector", "tablename"},
+		    .description = "Searches the index for the k (appriximate) closest points to q. Params can be filled with "
+		                   "parameters that are passed onto the search function. The filter is executed like 'SELECT "
+		                   "idselector FROM tablename WHERE filter>1'. idselector must match the ids given when "
+		                   "training the data.",
+		    .examples = {"labels AS (SELECT UNNEST(faiss_search_filter('hnsw16', 2, emb, {'efSearch': '1000'}, "
+			             "'id>100', 'id', 'data')).label lbl"},
+		};
+		search_function_info2.descriptions.push_back(desc2);
+		loader.RegisterFunction(search_function_info2);
 	}
 
 	{
@@ -1152,14 +1261,41 @@ static void LoadInternal(ExtensionLoader &loader) {
 		    LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR};
 
 		ScalarFunction search_function("faiss_search_filter_set", parameters, return_type, SearchFunctionFilterSet);
-		loader.RegisterFunction(search_function);
+
+		CreateScalarFunctionInfo search_function_info(search_function);
+		FunctionDescription desc {
+		    .parameter_names = {"name", "k", "q", "filter", "idselector", "tablename"},
+		    .description =
+		        "Searches the index for the k (appriximate) closest points to the points in q. Params can be filled "
+		        "with "
+		        "parameters that are passed onto the search function. The filter is executed like 'SELECT "
+		        "idselector FROM tablename WHERE filter>1'. idselector must match the ids given when training the "
+		        "data.",
+		    .examples = {"labels AS (SELECT UNNEST(faiss_search_filter('hnsw16', 2, [emb1, emb2], "
+			             "'id>100', 'id', 'data')).label lbl FROM queries)"},
+		};
+		search_function_info.descriptions.push_back(desc);
+		loader.RegisterFunction(search_function_info);
 
 		parameters.push_back(LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR));
 		ScalarFunction search_function_filter_params("faiss_search_filter_set", parameters, return_type,
 		                                             SearchFunctionFilterSet);
-		CreateScalarFunctionInfo search_info_params(search_function_filter_params);
-		search_info_params.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
-		loader.RegisterFunction(search_info_params);
+		CreateScalarFunctionInfo search_function_info2(search_function_filter_params);
+		search_function_info2.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
+
+		FunctionDescription desc2 {
+		    .parameter_names = {"name", "k", "q", "filter", "idselector", "tablename", "parameters"},
+		    .description =
+		        "Searches the index for the k (appriximate) closest points to the points in q. Params can be filled "
+		        "with parameters that are passed onto the search function. The filter is executed appriximatly like "
+		        "'SELECT idselector FROM tablename WHERE filter>1'. idselector must match the ids given when training "
+		        "the data. The parameters are values passed on to the faiss search function.",
+		    .examples =
+		        {"labels AS (SELECT UNNEST(faiss_search_filter('hnsw16', 2, [emb1, emb2], {'efSearch': '1000'}, "
+				 "'id>100', 'id', 'data')).label lbl FROM queries)"},
+		};
+		search_function_info2.descriptions.push_back(desc2);
+		loader.RegisterFunction(search_function_info2);
 	}
 }
 
