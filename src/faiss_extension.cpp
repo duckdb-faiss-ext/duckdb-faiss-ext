@@ -4,7 +4,6 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/helper.hpp"
 #include "duckdb/common/optional_ptr.hpp"
-#include "duckdb/common/shared_ptr.hpp"
 #include "duckdb/common/typedefs.hpp"
 #include "duckdb/common/types.hpp"
 #include "duckdb/common/types/data_chunk.hpp"
@@ -12,6 +11,10 @@
 #include "duckdb/common/types/vector.hpp"
 #include "duckdb/common/unique_ptr.hpp"
 #include "duckdb/common/vector.hpp"
+#include "duckdb/common/vector/flat_vector.hpp"
+#include "duckdb/common/vector/list_vector.hpp"
+#include "duckdb/common/vector/sequence_vector.hpp"
+#include "duckdb/common/vector/struct_vector.hpp"
 #include "duckdb/execution/execution_context.hpp"
 #include "duckdb/execution/expression_executor.hpp"
 #include "duckdb/function/function.hpp"
@@ -77,9 +80,9 @@ struct CreateFunctionData : public TableFunctionData {
 	uint64_t paramCount = 0;
 };
 
-std::unordered_map<std::string, CreateParamHandler> FaissExtension::create_param_handlers;
+identifier_map_t<CreateParamHandler> FaissExtension::create_param_handlers;
 
-void FaissExtension::RegisterCreateParameter(const std::string &key, CreateParamHandler handler) {
+void FaissExtension::RegisterCreateParameter(const Identifier &key, CreateParamHandler handler) {
 	create_param_handlers[key] = handler;
 }
 
@@ -94,7 +97,7 @@ void FaissExtension::RegisterMetricType() {
 }
 
 static unique_ptr<FunctionData> CreateBind(ClientContext &, TableFunctionBindInput &input,
-                                           vector<LogicalType> &return_types, vector<string> &names) {
+                                           vector<LogicalType> &return_types, vector<Identifier> &names) {
 	auto result = make_uniq<CreateFunctionData>();
 	return_types.emplace_back(LogicalType::BOOLEAN);
 	names.emplace_back("Success");
@@ -110,11 +113,13 @@ static unique_ptr<FunctionData> CreateBind(ClientContext &, TableFunctionBindInp
 	}
 
 	for (const auto &kv : input.named_parameters) {
+		// TODO: We need to compare case insensitively. Maybe we can put the Identifier in the map?
+		// TODO: Maybe use named_argument_map_t??
 		auto it = FaissExtension::create_param_handlers.find(kv.first);
 		if (it != FaissExtension::create_param_handlers.end()) {
 			it->second(*result, kv.second);
 		} else {
-			throw InvalidInputException("Unknown named parameter: %s", kv.first);
+			throw InvalidInputException("Unknown named parameter: %s", kv.first.GetIdentifierName());
 		}
 	}
 	return std::move(result);
@@ -169,7 +174,7 @@ struct SaveFunctionData : public TableFunctionData {
 };
 
 static unique_ptr<FunctionData> SaveBind(ClientContext &, TableFunctionBindInput &input,
-                                         vector<LogicalType> &return_types, vector<string> &names) {
+                                         vector<LogicalType> &return_types, vector<Identifier> &names) {
 	auto result = make_uniq<SaveFunctionData>();
 	return_types.emplace_back(LogicalType::BOOLEAN);
 	names.emplace_back("Success");
@@ -205,7 +210,7 @@ struct LoadFunctionData : public TableFunctionData {
 };
 
 static unique_ptr<FunctionData> LoadBind(ClientContext &, TableFunctionBindInput &input,
-                                         vector<LogicalType> &return_types, vector<string> &names) {
+                                         vector<LogicalType> &return_types, vector<Identifier> &names) {
 	auto result = make_uniq<LoadFunctionData>();
 	return_types.emplace_back(LogicalType::BOOLEAN);
 	names.emplace_back("Success");
@@ -244,7 +249,7 @@ struct DestroyFunctionData : public TableFunctionData {
 };
 
 static unique_ptr<FunctionData> DestroyBind(ClientContext &, TableFunctionBindInput &input,
-                                            vector<LogicalType> &return_types, vector<string> &names) {
+                                            vector<LogicalType> &return_types, vector<Identifier> &names) {
 	auto result = make_uniq<DestroyFunctionData>();
 	return_types.emplace_back(LogicalType::BOOLEAN);
 	names.emplace_back("Success");
@@ -270,10 +275,10 @@ static unique_ptr<Vector> ListVectorToFaiss(ClientContext &context, Vector &inpu
 		throw InvalidInputException("Need list type for embeddings vectors");
 	}
 
-	input_vector.Flatten(n_lists); // FIXME use canonical
+	input_vector.Flatten();
 	D_ASSERT(input_vector.GetVectorType() == VectorType::FLAT_VECTOR);
 
-	auto list_entries = ListVector::GetData(input_vector);
+	auto list_entries = FlatVector::GetData<list_entry_t>(input_vector);
 
 	for (idx_t row_idx = 0; row_idx < n_lists; row_idx++) {
 		if (list_entries[row_idx].length != dimension) {
@@ -282,12 +287,10 @@ static unique_ptr<Vector> ListVectorToFaiss(ClientContext &context, Vector &inpu
 		}
 	}
 
-	auto list_child = ListVector::GetEntry(input_vector);
-	// TODO use canonical here as well
-
+	Vector &list_child = ListVector::GetChildMutable(input_vector);
 	auto data_elements = n_lists * dimension;
 
-	list_child.Flatten(data_elements);
+	list_child.Flatten();
 
 	auto cast_result = make_uniq<Vector>(LogicalType::FLOAT, data_elements);
 	VectorOperations::Cast(context, list_child, *cast_result, data_elements);
@@ -312,7 +315,7 @@ struct MTrainData : TableFunctionData {
 };
 
 static unique_ptr<FunctionData> MTrainBind(ClientContext &, TableFunctionBindInput &input,
-                                           vector<LogicalType> &return_types, vector<string> &names) {
+                                           vector<LogicalType> &return_types, vector<Identifier> &names) {
 	auto bind_data = make_uniq<MTrainData>();
 
 	return_types.emplace_back(LogicalType::BOOLEAN);
@@ -421,7 +424,7 @@ struct AddData : TableFunctionData {
 };
 
 static unique_ptr<FunctionData> AddBind(ClientContext &context, TableFunctionBindInput &input,
-                                        vector<LogicalType> &return_types, vector<string> &names) {
+                                        vector<LogicalType> &return_types, vector<Identifier> &names) {
 	auto bind_data = make_uniq<AddData>();
 
 	return_types.emplace_back(LogicalType::BOOLEAN);
@@ -494,8 +497,8 @@ static OperatorResultType AddFunction(ExecutionContext &context, TableFunctionIn
 	                                   input.size(), entry.index->d);
 	auto child_ptr = FlatVector::GetData<float>(*child_vec);
 
-	Vector label_cast_vec(LogicalType::BIGINT);
-	faiss::idx_t *label_ptr;
+	Vector label_cast_vec = Vector(LogicalType::BIGINT);
+	faiss::idx_t const *label_ptr;
 	if (entry.custom_labels == TRUE) {
 		VectorOperations::Cast(context.client, input.data[0], label_cast_vec, input.size());
 		label_ptr = FlatVector::GetData<faiss::idx_t>(label_cast_vec);
@@ -618,7 +621,7 @@ static OperatorFinalizeResultType AddFinaliseFunction(ExecutionContext &context,
 
 // Searches the faiss index contained in the FaissIndexEntry using the given queries and inputdata and search params.
 // The results are stored in the outputvector as a struct-type of the form {rank, id, distance}.
-void searchIntoVector(ClientContext &ctx, FaissIndexEntry &entry, Vector inputdata, size_t nQueries, size_t nResults,
+void searchIntoVector(ClientContext &ctx, FaissIndexEntry &entry, Vector &inputdata, size_t nQueries, size_t nResults,
                       faiss::SearchParameters *searchParams, Vector &output) {
 	unique_ptr<Vector> child_vec = ListVectorToFaiss(ctx, inputdata, nQueries, entry.index->d);
 	auto child_ptr = FlatVector::GetData<float>(*child_vec);
@@ -639,12 +642,12 @@ void searchIntoVector(ClientContext &ctx, FaissIndexEntry &entry, Vector inputda
 
 	ListVector::SetListSize(output, nQueries * nResults);
 	ListVector::Reserve(output, nQueries * nResults);
-	list_entry_t *list_ptr = ListVector::GetData(output);
-	Vector &result_struct_vector = ListVector::GetEntry(output);
-	vector<unique_ptr<Vector>> &struct_entries = StructVector::GetEntries(result_struct_vector);
-	int *rank_ptr = FlatVector::GetData<int32_t>(*struct_entries[0]);
-	int64_t *label_ptr = FlatVector::GetData<int64_t>(*struct_entries[1]);
-	float *distance_ptr = FlatVector::GetData<float>(*struct_entries[2]);
+	list_entry_t *list_ptr = FlatVector::GetDataMutable<list_entry_t>(output);
+	Vector &result_struct_vector = ListVector::GetChildMutable(output);
+	vector<Vector> &struct_entries = StructVector::GetEntries(result_struct_vector);
+	int *rank_ptr = FlatVector::GetDataMutable<int32_t>(struct_entries[0]);
+	int64_t *label_ptr = FlatVector::GetDataMutable<int64_t>(struct_entries[1]);
+	float *distance_ptr = FlatVector::GetDataMutable<float>(struct_entries[2]);
 
 	idx_t list_offset = 0;
 
@@ -731,25 +734,27 @@ void ProcessSelectionvector(unique_ptr<DataChunk> &chunk, std::vector<uint8_t> &
 	if (size == 0) {
 		return;
 	}
-	Vector data = chunk->data[0];
-	Vector ids = chunk->data[1];
-	uint8_t *__restrict dataBytes = data.GetData();
+	Vector &data = chunk->data[0];
+	Vector &ids = chunk->data[1];
+	data.Flatten();
+	uint8_t const *__restrict dataBytes = FlatVector::GetDataMutable<uint8_t>(data);
 
 	bool sequential;
 	uint64_t start;
 	uint64_t max;
 	switch (ids.GetVectorType()) {
 	case VectorType::SEQUENCE_VECTOR: {
-		int64_t sstart, increment, sequence_count;
-		SequenceVector::GetSequence(ids, sstart, increment, sequence_count);
+		int64_t sstart, increment;
+		int64_t sequence_count = ids.size();
+		SequenceVector::GetSequence(ids, sstart, increment);
 		start = sstart;
 		max = start + increment * sequence_count;
 		sequential = increment == 1 && start >= 0;
 		break;
 	}
 	default:
-		ids.Flatten(size); // TODO: we can do without the flatten!
-		uint64_t *__restrict idBytes = (uint64_t *)ids.GetData();
+		ids.Flatten();
+		uint64_t const *__restrict idBytes = (uint64_t *)FlatVector::GetData(ids);
 
 		uint64_t previous = idBytes[0] - 1;
 		sequential = true;
@@ -768,7 +773,8 @@ void ProcessSelectionvector(unique_ptr<DataChunk> &chunk, std::vector<uint8_t> &
 
 	// If the input is not sequential or alligned, use the slow path
 	if (!sequential) {
-		uint64_t *__restrict idBytes = (uint64_t *)ids.GetData();
+		ids.Flatten(); // Needed if it a SequentialVector
+		uint64_t const *__restrict idBytes = FlatVector::GetData<uint64_t>(ids);
 		for (int i = 0; i < size; i++) {
 			uint64_t id = idBytes[i];
 			int arrIndex = id / 8;
@@ -804,8 +810,9 @@ void ProcessSelectionvector(unique_ptr<DataChunk> &chunk, std::vector<uint8_t> &
 }
 
 void ProcessIncludeSet(unique_ptr<DataChunk> &chunk, std::vector<faiss::idx_t> &output) {
-	Vector ids = chunk->data[0];
-	uint64_t *__restrict idBytes = (uint64_t *)ids.GetData();
+	Vector &ids = chunk->data[0];
+	ids.Flatten();
+	uint64_t const *__restrict idBytes = FlatVector::GetData<uint64_t>(ids);
 
 	idx_t target = output.size();
 	output.resize(output.size() + chunk->size());
@@ -834,7 +841,7 @@ struct SelData : public TableFunctionData {
 };
 
 static unique_ptr<FunctionData> SelBind(ClientContext &context, TableFunctionBindInput &input,
-                                        vector<LogicalType> &return_types, vector<string> &names) {
+                                        vector<LogicalType> &return_types, vector<Identifier> &names) {
 	auto bind_data = make_uniq<AddData>();
 
 	return_types.emplace_back(LogicalType::BOOLEAN);
@@ -909,7 +916,7 @@ void SearchFunction(DataChunk &input, ExpressionState &state, Vector &output) {
 		throw InvalidInputException("Could not find index %s.", key);
 	}
 
-	input.data[2].Flatten(input.size());
+	input.data[2].Flatten();
 	size_t nQueries = FlatVector::Validity(input.data[2]).CountValid(input.size());
 	size_t nResults = input.data[1].GetValue(0).GetValue<int32_t>();
 	shared_ptr<Vector> userParams = nullptr;
@@ -945,14 +952,14 @@ void SearchFunctionFilter(DataChunk &input, ExpressionState &state, Vector &outp
 
 	shared_ptr<DatabaseInstance> db = state.GetContext().db;
 	Connection con = Connection(*db);
-	unique_ptr<QueryResult> result = con.SendQuery(filterExpression);
+	unique_ptr<QueryResult> result = con.Query(filterExpression);
 
 	if (result->HasError()) {
 		throw InvalidInputException("uable to execute filter query: %s", result->GetError());
 	}
 	unique_ptr<DataChunk> chunk = unique_ptr<DataChunk>();
 	ErrorData error;
-	while (result->TryFetch(chunk, error) && chunk) {
+	while (result->TryFetchOrError(chunk, error) && chunk) {
 	}
 
 	// create selector
@@ -991,8 +998,9 @@ void SearchFunctionFilterSet(DataChunk &input, ExpressionState &state, Vector &o
 	string filterExpression = ss.str();
 
 	shared_ptr<DatabaseInstance> db = state.GetContext().db;
-	shared_ptr<ClientContext> subcommection = make_shared_ptr<ClientContext>(db);
-	unique_ptr<QueryResult> result = subcommection->Query(filterExpression, false);
+	Connection subconnection = Connection(*db);
+	unique_ptr<QueryResult> result = subconnection.Query(filterExpression);
+	result->Materialize();
 
 	if (result->HasError()) {
 		throw InvalidInputException("uable to execute filter query: %s", result->GetError());
@@ -1000,7 +1008,7 @@ void SearchFunctionFilterSet(DataChunk &input, ExpressionState &state, Vector &o
 	vector<faiss::idx_t> mask = vector<faiss::idx_t>();
 	unique_ptr<DataChunk> chunk = unique_ptr<DataChunk>();
 	ErrorData error;
-	while (result->TryFetch(chunk, error) && chunk) {
+	while (result->TryFetchOrError(chunk, error) && chunk) {
 		ProcessIncludeSet(chunk, mask);
 	}
 
@@ -1021,6 +1029,11 @@ void SearchFunctionFilterSet(DataChunk &input, ExpressionState &state, Vector &o
 	searchIntoVector(state.GetContext(), entry, input.data[2], nQueries, nResults, searchParams[0].get(), output);
 }
 
+void AddMetricType(SimpleFunction &function) {
+	function.GetSignature().ExtendTypedKwargs(
+	    [](TypedKwargs &options) { options.Add("metrix", LogicalType::VARCHAR); });
+}
+
 // LoadInternal adds the faiss functions to the database
 static void LoadInternal(ExtensionLoader &loader) {
 	FaissExtension::RegisterMetricType();
@@ -1028,7 +1041,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 	{
 		TableFunction create_func("faiss_create", {LogicalType::VARCHAR, LogicalType::INTEGER, LogicalType::VARCHAR},
 		                          CreateFunction, CreateBind);
-		create_func.named_parameters["metric_type"] = LogicalType::VARCHAR;
+		AddMetricType(create_func);
+
 		loader.RegisterFunction(create_func);
 	}
 	{
@@ -1036,7 +1050,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 		                          {LogicalType::VARCHAR, LogicalType::INTEGER, LogicalType::VARCHAR,
 		                           LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR)},
 		                          CreateFunction, CreateBind);
-		create_func.named_parameters["metric_type"] = LogicalType::VARCHAR;
+		AddMetricType(create_func);
+
 		loader.RegisterFunction(create_func);
 	}
 #ifdef DDBF_ENABLE_GPU

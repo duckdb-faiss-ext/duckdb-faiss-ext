@@ -12,8 +12,8 @@ public:
 	void Load(ExtensionLoader &db) override;
 	std::string Name() override;
 	std::string Version() const override;
-	static void RegisterCreateParameter(const std::string &key, CreateParamHandler handler);
-	static std::unordered_map<std::string, CreateParamHandler> create_param_handlers;
+	static void RegisterCreateParameter(const Identifier &key, CreateParamHandler handler);
+	static identifier_map_t<CreateParamHandler> create_param_handlers;
 
 	static void RegisterMetricType();
 };

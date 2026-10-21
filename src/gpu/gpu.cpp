@@ -1,4 +1,5 @@
 #include "duckdb/function/function.hpp"
+#include "duckdb/function/table_function.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/storage/object_cache.hpp"
 #include "faiss/gpu/GpuCloner.h"
