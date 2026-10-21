@@ -1,6 +1,7 @@
 #include "duckdb/common/helper.hpp"
 #include "duckdb/common/string.hpp"
 #include "duckdb/common/types/vector.hpp"
+#include "duckdb/common/vector/map_vector.hpp"
 
 #include <cstdint>
 
@@ -24,9 +25,7 @@ string getUserParamValue(Vector &userParams, uint64_t paramCount, string key) {
 // Value must be of type Map, which is just a list of structs (k-v pairs)
 std::tuple<shared_ptr<Vector>, uint64_t> mapFromValue(Value v) {
 	vector<Value> paramList = ListValue::GetChildren(v);
-	Vector values = Vector(v);
-	values.Reference(v);
 
-	return std::make_tuple(make_shared_ptr<Vector>(v), paramList.size());
+	return std::make_tuple(make_shared_ptr<Vector>(v, count_t(1)), paramList.size());
 }
 } // namespace duckdb

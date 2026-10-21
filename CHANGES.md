@@ -1,5 +1,8 @@
+# 0.12.2
+ - Bump to duckdb 2.0!
+
 # 0.12.1
- - Readd accidentaly deleted`faiss_save`
+ - Read accidentaly deleted`faiss_save`
  - Fix named parameters when loading the extension
  - minor internal changes
 
