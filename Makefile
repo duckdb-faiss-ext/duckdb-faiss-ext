@@ -15,7 +15,6 @@ EXT_RELEASE_FLAGS=""
 
 include extension-ci-tools/makefiles/duckdb_extension.Makefile
 
-
 prebuild:
 
 ifneq ($(DUCKDB_PLATFORM), )
@@ -31,7 +30,6 @@ prebuild:
 	dnf makecache -y
 	dnf module install -y nvidia-driver
 	dnf install -y cuda-toolkit-12-9
-# 	cd faiss && git apply ../faiss.patch
 endif
 ifeq ($(findstring -$(DUCKDB_PLATFORM)-, -linux_amd64_musl-), -$(DUCKDB_PLATFORM)-)
 FAISS_EXT_NO_GPU=TRUE
@@ -43,15 +41,6 @@ prebuild:
 	cp ${VCPKG_ROOT}/triplets/arm64-osx.cmake overlay_triplets/arm64-osx.cmake
 	echo "set(VCPKG_OSX_DEPLOYMENT_TARGET 11.0)" >> overlay_triplets/x64-osx.cmake
 	echo "set(VCPKG_OSX_DEPLOYMENT_TARGET 11.0)" >> overlay_triplets/arm64-osx.cmake
-# 	cd faiss && git apply ../faiss.patch
-endif
-ifeq ($(findstring -$(DUCKDB_PLATFORM)-, -windows_amd64_mingw-), -$(DUCKDB_PLATFORM)-)
-prebuild:
-# 	cd faiss && git apply ../faiss.patch
-endif
-ifeq ($(findstring -$(DUCKDB_PLATFORM)-, -windows_amd64-), -$(DUCKDB_PLATFORM)-)
-prebuild:
-# 	cd faiss && git apply ../faiss.patch
 endif
 endif
 
