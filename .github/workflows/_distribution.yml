@@ -23,7 +23,7 @@ jobs:
       ci_tools_version: v2.0-cyanoptera
       extension_name: faiss
       vcpkg_url: "https://github.com/microsoft/vcpkg.git"
-      vcpkg_commit: 54760c3439fa2fdf2f42ccd730fcf2639c3fe101
+      # vcpkg_commit: 54760c3439fa2fdf2f42ccd730fcf2639c3fe101
       # osx_amd64 is disabled due to a build faillure (should be fixable)
       exclude_archs: "wasm_mvp;wasm_eh;wasm_threads"
       build_duckdb_shell: false
