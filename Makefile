@@ -42,6 +42,10 @@ prebuild:
 	echo "set(VCPKG_OSX_DEPLOYMENT_TARGET 11.0)" >> overlay_triplets/x64-osx.cmake
 	echo "set(VCPKG_OSX_DEPLOYMENT_TARGET 11.0)" >> overlay_triplets/arm64-osx.cmake
 endif
+ifeq ($(findstring -$(DUCKDB_PLATFORM)-, -windows_amd64_mingw-), -$(DUCKDB_PLATFORM)-)
+prebuild:
+	cd faiss && git apply ../faiss.patch
+endif
 endif
 
 ifneq ("${FAISS_EXT_NO_GPU}", "TRUE")
