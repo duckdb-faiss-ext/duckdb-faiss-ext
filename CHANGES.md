@@ -1,5 +1,6 @@
 # 0.12.2
  - Bump to duckdb 2.0!
+ - Bump faiss to 15.1
 
 # 0.12.1
  - Read accidentaly deleted`faiss_save`
